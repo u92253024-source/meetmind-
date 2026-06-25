@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isValidProposal(data) {
+      return data.keys().hasAll(['meetingName', 'title', 'unit', 'content', 'result', 'fileName', 'id', 'createdAt']) &&
+             data.meetingName is string &&
+             data.title is string &&
+             data.unit is string &&
+             data.content is string &&
+             data.result is string &&
+             data.fileName is string &&
+             data.id is string;
+    }
+
+    // Proposals collection (the merged data)
+    match /proposals/{proposalId} {
+      allow read: if true; // Publicly readable for this demo
+      allow write: if isSignedIn();
+    }
+
+    // Archives collection (session batches)
+    match /archives/{archiveId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+    
+    // Master data (the single data.json equivalent document)
+    match /master/data {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+  }
+}

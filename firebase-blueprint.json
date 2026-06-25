@@ -1,0 +1,41 @@
+{
+  "entities": {
+    "Proposal": {
+      "title": "Meeting Proposal",
+      "description": "Structured data from a meeting proposal",
+      "type": "object",
+      "properties": {
+        "meetingName": { "type": "string" },
+        "title": { "type": "string" },
+        "unit": { "type": "string" },
+        "content": { "type": "string" },
+        "result": { "type": "string" },
+        "fileName": { "type": "string" },
+        "page": { "type": "number", "nullable": true },
+        "id": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["meetingName", "title", "unit", "content", "result", "fileName", "id", "createdAt"]
+    }
+  },
+  "firestore": {
+    "proposals/{proposalId}": {
+      "schema": "Proposal",
+      "description": "The master list of all proposals merged from all sessions"
+    },
+    "archives/{archiveId}": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "fileName": { "type": "string" },
+          "proposals": {
+            "type": "array",
+            "items": { "$ref": "Proposal" }
+          },
+          "timestamp": { "type": "string", "format": "date-time" }
+        }
+      },
+      "description": "Individual batches of proposals processed from unique files"
+    }
+  }
+}

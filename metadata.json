@@ -1,0 +1,5 @@
+{
+  "name": "NCCU Meeting Minutes Extractor",
+  "description": "A professional assistant for extracting structured data from NCCU Academic Affairs meeting minutes PDF files.",
+  "requestFramePermissions": []
+}
