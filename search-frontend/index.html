@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>教務會議資料庫搜尋系統</title>
+  <style>
+    body {
+      font-family: "Noto Sans TC", sans-serif;
+      background: #f5f7fb;
+      color: #2f3640;
+      margin: 0;
+      padding: 24px;
+      line-height: 1.6;
+    }
+
+    .container {
+      max-width: 1800px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: 52px;
+      line-height: 1.2;
+      color: #243b5a;
+      font-weight: 800;
+    }
+
+    .subtitle {
+      color: #6b7280;
+      font-size: 18px;
+      margin-bottom: 28px;
+    }
+
+    .panel {
+      background: #fff;
+      border: 1px solid #dbe4f0;
+      border-radius: 22px;
+      box-shadow: 0 8px 24px rgba(25, 45, 75, 0.06);
+      padding: 26px 28px;
+      margin-bottom: 26px;
+    }
+
+    .panel h2 {
+      margin: 0 0 18px;
+      font-size: 28px;
+      color: #243b5a;
+    }
+
+    .search-grid {
+      display: grid;
+      grid-template-columns: 2.2fr 1fr 1.1fr 1.2fr;
+      gap: 16px;
+      margin-bottom: 12px;
+    }
+
+    input,
+    select {
+      width: 100%;
+      height: 58px;
+      border: 1px solid #cfd8e3;
+      border-radius: 18px;
+      font-size: 18px;
+      padding: 0 18px;
+      box-sizing: border-box;
+      background: #fff;
+      color: #374151;
+      outline: none;
+    }
+
+    input:focus,
+    select:focus {
+      border-color: #4f8ff7;
+      box-shadow: 0 0 0 3px rgba(79, 143, 247, 0.15);
+    }
+
+    .hint {
+      color: #7b8794;
+      font-size: 15px;
+      margin: 0;
+      line-height: 1.9;
+    }
+
+    .hint code {
+      background: #eef2f8;
+      border: 1px solid #dbe4f0;
+      border-radius: 5px;
+      padding: 1px 6px;
+      font-size: 14px;
+      color: #4b5563;
+    }
+
+    .result-meta {
+      color: #5f6b7a;
+      font-size: 18px;
+      margin-bottom: 16px;
+    }
+
+    .table-wrap {
+      width: 100%;
+      overflow-x: auto;
+      border: 1px solid #d7e0ea;
+      border-radius: 16px;
+      background: #fff;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      min-width: 1400px;
+    }
+
+    thead th {
+      background: #eaf2ff;
+      color: #374151;
+      font-size: 18px;
+      text-align: left;
+      padding: 16px 14px;
+      border-right: 1px solid #d7e0ea;
+      border-bottom: 1px solid #d7e0ea;
+    }
+
+    tbody td {
+      padding: 16px 14px;
+      border-right: 1px solid #d7e0ea;
+      border-bottom: 1px solid #d7e0ea;
+      vertical-align: top;
+      font-size: 16px;
+      color: #374151;
+      word-break: break-word;
+      background: #fff;
+    }
+
+    thead th:last-child,
+    tbody td:last-child {
+      border-right: none;
+    }
+
+    tbody tr:hover td {
+      background: #fbfdff;
+    }
+
+    .col-year    { width: 6%; }
+    .col-meeting { width: 16%; }
+    .col-unit    { width: 12%; }
+    .col-title   { width: 22%; }
+    .col-content { width: 16%; }
+    .col-result  { width: 16%; }
+
+    .col-page {
+      width: 6%;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .page-tag {
+      display: inline-block;
+      background: #eef4ff;
+      color: #3b6cbf;
+      border: 1px solid #c8d9f5;
+      border-radius: 8px;
+      font-size: 13px;
+      padding: 2px 8px;
+      white-space: nowrap;
+    }
+
+    th.col-pdf,
+    td.col-pdf {
+      width: 120px;
+      min-width: 120px;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    mark {
+      background: #fff3a3;
+      color: inherit;
+      border-radius: 2px;
+      padding: 0 1px;
+    }
+
+    .summary-link {
+      color: #4d79b3;
+      text-decoration: underline;
+      cursor: pointer;
+      line-height: 1.8;
+    }
+
+    .summary-link:hover {
+      color: #275ea3;
+    }
+
+    .pdf-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 86px;
+      height: 40px;
+      padding: 0 14px;
+      border: 1px solid #d7dfe8;
+      border-radius: 999px;
+      background: #fff;
+      color: #4b5563;
+      text-decoration: none;
+      font-size: 14px;
+      white-space: nowrap;
+      box-sizing: border-box;
+    }
+
+    .pdf-btn:hover {
+      background: #f8fafc;
+      border-color: #b8c4d3;
+    }
+
+    .pagination {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 18px;
+    }
+
+    .page-btn {
+      min-width: 42px;
+      height: 42px;
+      border: 1px solid #cfd8e3;
+      background: #fff;
+      color: #374151;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 15px;
+    }
+
+    .page-btn.active {
+      background: #4f8ff7;
+      color: #fff;
+      border-color: #4f8ff7;
+    }
+
+    .empty {
+      padding: 24px 8px 6px;
+      color: #6b7280;
+      font-size: 16px;
+    }
+
+    .modal-mask {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 999;
+      padding: 24px;
+      box-sizing: border-box;
+    }
+
+    .modal {
+      width: min(920px, 100%);
+      max-height: 85vh;
+      overflow: auto;
+      background: #fff;
+      border-radius: 18px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+      padding: 24px;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .modal-title {
+      font-size: 24px;
+      font-weight: 700;
+      color: #243b5a;
+    }
+
+    .close-btn {
+      border: none;
+      background: #eef2f7;
+      color: #374151;
+      border-radius: 10px;
+      padding: 10px 14px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    .modal-content {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 16px;
+      color: #374151;
+      line-height: 1.9;
+    }
+
+    @media (max-width: 1100px) {
+      .search-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media (max-width: 768px) {
+      body { padding: 14px; }
+      h1 { font-size: 34px; }
+      .subtitle { font-size: 16px; }
+      .panel { padding: 18px; border-radius: 18px; }
+      .panel h2 { font-size: 22px; }
+      .search-grid { grid-template-columns: 1fr; }
+      input, select { height: 52px; font-size: 16px; }
+      table { min-width: 1100px; }
+      th.col-pdf, td.col-pdf { width: 104px; min-width: 104px; }
+      .pdf-btn { min-width: 74px; height: 38px; font-size: 13px; padding: 0 10px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>教務會議資料庫搜尋系統v2.1</h1>
+    <p class="subtitle">可依關鍵字、年度與類型查詢教務會議議題內容與決議摘要，並下載會議紀錄 PDF。</p>
+
+    <section class="panel">
+      <h2>條件搜尋</h2>
+      <div class="search-grid">
+        <input id="searchInput" type="text" placeholder="請輸入關鍵字" autocomplete="off" />
+        <select id="yearFilter">
+          <option value="">全部年度</option>
+        </select>
+        <select id="typeFilter">
+          <option value="">全部類型</option>
+          <option value="新增">新增</option>
+          <option value="修訂">修訂</option>
+          <option value="申請">申請</option>
+          <option value="報告">報告</option>
+          <option value="其他">其他</option>
+        </select>
+        <select id="sortMode" aria-label="排序方式">
+          <option value="relevance">依相關度排序</option>
+          <option value="chrono">依年度時序排序</option>
+        </select>
+      </div>
+      <p class="hint">
+        多個關鍵字請用空白分隔（需全部命中）；用引號查完整詞組，例
+        <code>"外語畢業標準"</code>；關鍵字前加減號可排除，例
+        <code>通識 -遠距</code>。點擊內容摘要或決議摘要可查看完整文字。
+      </p>
+    </section>
+
+    <section class="panel">
+      <h2>搜尋結果</h2>
+      <div id="resultCount" class="result-meta">共 0 筆結果</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th class="col-year">年度</th>
+              <th class="col-meeting">會議</th>
+              <th class="col-unit">單位</th>
+              <th class="col-title">案由</th>
+              <th class="col-content">內容摘要</th>
+              <th class="col-result">決議摘要</th>
+              <th class="col-page">頁數</th>
+              <th class="col-pdf">PDF</th>
+            </tr>
+          </thead>
+          <tbody id="resultsBody">
+            <tr>
+              <td colspan="8" class="empty">請輸入關鍵字或設定篩選條件後開始搜尋。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="pagination" class="pagination"></div>
+    </section>
+  </div>
+
+  <div id="modalMask" class="modal-mask">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <div id="modalTitle" class="modal-title">完整內容</div>
+        <button id="closeModalBtn" class="close-btn" type="button">關閉</button>
+      </div>
+      <div id="modalContent" class="modal-content"></div>
+    </div>
+  </div>
+
+  <script>
+    // ── 資料與狀態 ────────────────────────────────────────────
+    let database = [];
+    let filtered = [];
+    let currentPage = 1;
+    const PER_PAGE = 10;
+
+    // ── 初始化 ────────────────────────────────────────────────
+    async function init() {
+      try {
+        const res = await fetch("data.json");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        database = await res.json();
+        prepareData();
+        buildYearFilter();
+        renderEmpty();
+      } catch (e) {
+        console.error("初始化失敗：", e);
+        document.getElementById("resultsBody").innerHTML =
+          '<tr><td colspan="7" class="empty">無法讀取 data.json，請確認檔案位置是否正確。</td></tr>';
+      }
+    }
+
+    // ── 資料前處理 ────────────────────────────────────────────
+    function safeStr(v) {
+      return v == null ? "" : String(v);
+    }
+
+    // ── 中文數字 → 阿拉伯數字（支援一～九十九）─────────────────
+    const CN_MAP = { 零:0, 一:1, 二:2, 三:3, 四:4, 五:5, 六:6, 七:7, 八:8, 九:9 };
+    function cnToInt(s) {
+      s = (s || "").trim();
+      if (!s) return null;
+      if (!s.includes("十")) {
+        return s.length === 1 ? (CN_MAP[s] ?? null) : null;
+      }
+      const parts = s.split("十");
+      const tens  = parts[0] ? (CN_MAP[parts[0]] ?? 1) : 1;
+      const ones  = (parts[1] && CN_MAP[parts[1]] !== undefined) ? CN_MAP[parts[1]] : 0;
+      return tens * 10 + ones;
+    }
+
+    function extractYear(meetingName) {
+      const s = safeStr(meetingName);
+      // 格式一：阿拉伯數字「96 學年度」
+      // 注意：部分舊資料的「年」「度」是 CJK 相容字（U+F98E / U+FA01），
+      // 但「學年度」三字的正規比對只需涵蓋 U+5B78（學）U+5E74（年）U+5EA6（度）
+      // 以及相容字 U+F98E（年）U+FA01（度），故改用 Unicode range 兜底
+      const m1 = s.match(/(\d{2,3})\s*[\u5B78][\u5E74\uF98E][\u5EA6\uFA01]/) ||
+                 s.match(/(\d{2,3})\s*學年度/);
+      if (m1) return m1[1];
+      // 格式二：中文數字「九十二學年度」
+      const m2 = s.match(/([零一二三四五六七八九十]+)學年度/);
+      if (m2) { const v = cnToInt(m2[1]); return v != null ? String(v) : "未知"; }
+      return "未知";
+    }
+
+    function extractSemester(meetingName) {
+      // 第幾學期 → 1 或 2；找不到回傳 9（排最後）
+      const s = safeStr(meetingName);
+      const m1 = s.match(/第\s*([12])\s*學期/);
+      if (m1) return Number(m1[1]);
+      const m2 = s.match(/第([一二])學期/);
+      if (m2) return m2[1] === "一" ? 1 : 2;
+      return 9;
+    }
+
+    function extractSeq(meetingName) {
+      // 臨時會議排在正式會議之後（回傳 99）
+      const s = safeStr(meetingName);
+      if (/臨時/.test(s)) return 99;
+      // 學期之後的次別
+      const afterSem = s.replace(/^.*?學期/, "");
+      const m1 = afterSem.match(/第\s*(\d+)\s*次/);
+      if (m1) return Number(m1[1]);
+      const m2 = afterSem.match(/第([一二三四五六七八九十]+)次/);
+      if (m2) { const v = cnToInt(m2[1]); return v != null ? v : 9; }
+      return 9;
+    }
+
+    function extractProposalNum(title) {
+      // 從案由標題抓提案序號「【提案一】」→ 1
+      const s = safeStr(title);
+      const m1 = s.match(/【提案\s*(\d+)\s*】/);
+      if (m1) return Number(m1[1]);
+      const m2 = s.match(/【提案([零一二三四五六七八九十]+)】/);
+      if (m2) { const v = cnToInt(m2[1]); return v != null ? v : 9999; }
+      return 9999;
+    }
+
+    function detectType(title) {
+      const t = safeStr(title);
+      if (/修正|修訂|修訂案|條文修正|辦法修正/.test(t)) return "修訂";
+      if (/申請|擬申請|申辦/.test(t))                    return "申請";
+      if (/報告|提請核備|核備|工作報告/.test(t))          return "報告";
+      if (/新增|新設|新開|增設|設立|成立/.test(t))        return "新增";
+      return "其他";
+    }
+
+    function prepareData() {
+      database = database.map((item, i) => {
+        const meetingName = safeStr(item.meetingName);
+        const title       = safeStr(item.title);
+        const unit        = safeStr(item.unit);
+        const content     = safeStr(item.content);
+        const result      = safeStr(item.result);
+        const fileName    = safeStr(item.fileName);
+        const id          = safeStr(item.id) || `row_${i}`;
+        const year        = extractYear(meetingName);
+        const semester    = extractSemester(meetingName);
+        const seq         = extractSeq(meetingName);
+        const proposalNum = extractProposalNum(title);
+        const type        = detectType(title);
+
+        // 全文搜尋字串（小寫，供 includes 比對）
+        const searchText = [
+          title, content, result, unit, meetingName, fileName, id
+        ].join(" ").toLowerCase();
+
+        return {
+          ...item,
+          meetingName, title, unit, content, result, fileName, id,
+          year, semester, seq, proposalNum, type, searchText
+        };
+      });
+    }
+
+    // ── 年度下拉選單 ──────────────────────────────────────────
+    function buildYearFilter() {
+      const years = [...new Set(database.map(d => d.year))]
+        .filter(y => y !== "未知")
+        .sort((a, b) => Number(a) - Number(b));   // 小 → 大
+
+      const sel = document.getElementById("yearFilter");
+      years.forEach(y => {
+        const opt = document.createElement("option");
+        opt.value = y;
+        opt.textContent = y;
+        sel.appendChild(opt);
+      });
+    }
+
+    // ── 排序：年度(小→大) → 學期(1→2) → 次別(1→2→...→99臨時) → 提案號 ──
+    function sortResults(arr) {
+      return arr.slice().sort((a, b) => {
+        const ya = Number(a.year) || 0, yb = Number(b.year) || 0;
+        if (ya !== yb) return ya - yb;
+        if (a.semester !== b.semester) return a.semester - b.semester;
+        if (a.seq !== b.seq) return a.seq - b.seq;
+        return a.proposalNum - b.proposalNum;
+      });
+    }
+
+    // ── 查詢字串解析 ──────────────────────────────────────────
+    // 支援三種語法：
+    //   1. 空白分隔多關鍵字 → 全部命中才算符合（AND）
+    //   2. "完整詞組"       → 視為單一關鍵字（可含空白）
+    //   3. -排除詞          → 命中即剔除
+    // 全形引號「」“” 與全形減號－ 一併視為半角處理，避免中文輸入法造成查不到。
+    function parseQuery(raw) {
+      const terms = [], excludes = [];
+      const s = safeStr(raw)
+        .replace(/[“”「」]/g, '"')   // “ ” 「 」 → "
+        .replace(/－/g, "-");                       // －       → -
+
+      const re = /(-?)(?:"([^"]*)"|(\S+))/g;
+      let m;
+      while ((m = re.exec(s)) !== null) {
+        const neg = m[1] === "-";
+        let t = (m[2] !== undefined ? m[2] : m[3]) || "";
+        t = t.replace(/^-+/, "").replace(/"/g, "").trim().toLowerCase();
+        if (!t) continue;
+        (neg ? excludes : terms).push(t);
+      }
+      return { terms, excludes };
+    }
+
+    // 目前是否套用相關度排序（需有正向關鍵字才有意義）
+    function isRelevanceMode(terms) {
+      return document.getElementById("sortMode").value === "relevance" && terms.length > 0;
+    }
+
+    // ── 搜尋主流程 ────────────────────────────────────────────
+    function search() {
+      const year = document.getElementById("yearFilter").value;
+      const type = document.getElementById("typeFilter").value;
+      const { terms, excludes } = parseQuery(document.getElementById("searchInput").value);
+
+      if (!terms.length && !excludes.length && !year && !type) {
+        filtered = [];
+        currentPage = 1;
+        renderEmpty();
+        return;
+      }
+
+      filtered = database.filter(item => {
+        if (year && item.year !== year) return false;
+        if (type && item.type !== type) return false;
+        // 多關鍵字：全部都要命中
+        for (const t of terms)    if (!item.searchText.includes(t)) return false;
+        // 排除詞：命中任一即剔除
+        for (const t of excludes) if (item.searchText.includes(t))  return false;
+        return true;
+      });
+
+      // 有關鍵字時可依相關度排序；否則一律依年度→學期→次別→提案號
+      filtered = isRelevanceMode(terms)
+        ? rankByScore(filtered, terms)
+        : sortResults(filtered);
+
+      currentPage = 1;
+      render();
+    }
+
+    // ── 相關度加權排序 ────────────────────────────────────────
+    // 案由 ×5、內容 ×3、決議 ×2、單位 ×1、會議 ×1，多關鍵字分數累加；
+    // 同分時退回年度→學期→次別→提案號，確保結果順序穩定。
+    function rankByScore(arr, terms) {
+      const regexes = terms.map(t => new RegExp(escapeRegExp(t), "gi"));
+
+      const scored = arr.map(item => {
+        let score = 0;
+        for (const re of regexes) {
+          const count = (field, weight) =>
+            ((safeStr(field).match(re) || []).length) * weight;
+
+          score += count(item.title,       5) +
+                   count(item.content,     3) +
+                   count(item.result,      2) +
+                   count(item.unit,        1) +
+                   count(item.meetingName, 1);
+        }
+        return { item, score };
+      });
+
+      scored.sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        const ya = Number(a.item.year) || 0, yb = Number(b.item.year) || 0;
+        if (ya !== yb) return ya - yb;
+        if (a.item.semester !== b.item.semester) return a.item.semester - b.item.semester;
+        if (a.item.seq !== b.item.seq) return a.item.seq - b.item.seq;
+        return a.item.proposalNum - b.item.proposalNum;
+      });
+
+      return scored.map(s => s.item);
+    }
+
+    // ── 渲染 ──────────────────────────────────────────────────
+    function escapeHtml(s) {
+      return safeStr(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function escapeRegExp(s) {
+      return safeStr(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    // 多關鍵字同時高亮（先逸出 HTML，再以逸出後的字串組正規表示式）
+    function highlight(text, terms) {
+      const escaped = escapeHtml(text);
+      if (!terms || !terms.length) return escaped;
+      const pattern = terms.map(t => escapeRegExp(escapeHtml(t))).filter(Boolean).join("|");
+      if (!pattern) return escaped;
+      return escaped.replace(new RegExp(`(${pattern})`, "gi"), "<mark>$1</mark>");
+    }
+
+    function shorten(text, max = 90) {
+      const s = safeStr(text);
+      return s.length > max ? s.slice(0, max) + "…" : s;
+    }
+
+    function renderEmpty() {
+      document.getElementById("resultCount").textContent = "共 0 筆結果";
+      document.getElementById("resultsBody").innerHTML =
+        '<tr><td colspan="8" class="empty">請輸入關鍵字或設定篩選條件後開始搜尋。</td></tr>';
+      document.getElementById("pagination").innerHTML = "";
+    }
+
+    function render() {
+      const total      = filtered.length;
+      const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
+      const { terms }  = parseQuery(document.getElementById("searchInput").value);
+      const sortLabel  = isRelevanceMode(terms) ? "依相關度" : "依年度時序";
+      document.getElementById("resultCount").textContent =
+        `共 ${total} 筆結果　第 ${currentPage} / ${totalPages} 頁　（${sortLabel}排序）`;
+      renderTable();
+      renderPagination();
+    }
+
+    function renderTable() {
+      const { terms } = parseQuery(document.getElementById("searchInput").value);
+      const start     = (currentPage - 1) * PER_PAGE;
+      const pageItems = filtered.slice(start, start + PER_PAGE);
+      const tbody     = document.getElementById("resultsBody");
+
+      if (!pageItems.length) {
+        tbody.innerHTML =
+          '<tr><td colspan="8" class="empty">查無資料，請嘗試其他關鍵字或調整篩選條件。</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = pageItems.map(item => {
+        const pdfCell = item.fileName
+          ? `<a class="pdf-btn" href="pdf/${encodeURIComponent(item.fileName)}" target="_blank">開啟檔案</a>`
+          : `<span style="color:#9ca3af">無檔案</span>`;
+
+        return `
+          <tr>
+            <td>${escapeHtml(item.year)}</td>
+            <td>${escapeHtml(item.meetingName)}</td>
+            <td>${escapeHtml(item.unit)}</td>
+            <td>${highlight(item.title, terms)}</td>
+            <td>
+              <span class="summary-link"
+                    data-preview="content"
+                    data-id="${escapeHtml(item.id)}">
+                ${highlight(shorten(item.content), terms)}
+              </span>
+            </td>
+            <td>
+              <span class="summary-link"
+                    data-preview="result"
+                    data-id="${escapeHtml(item.id)}">
+                ${highlight(shorten(item.result), terms)}
+              </span>
+            </td>
+            <td class="col-page">
+              ${item.page != null
+                ? `<span class="page-tag">第 ${escapeHtml(String(item.page))} 頁</span>`
+                : `<span style="color:#9ca3af">—</span>`}
+            </td>
+            <td class="col-pdf">${pdfCell}</td>
+          </tr>`;
+      }).join("");
+    }
+
+    function renderPagination() {
+      const totalPages = Math.ceil(filtered.length / PER_PAGE);
+      const el = document.getElementById("pagination");
+
+      if (totalPages <= 1) {
+        el.innerHTML = "";
+        return;
+      }
+
+      let html = `<button class="page-btn" data-page="${currentPage - 1}"
+                    ${currentPage === 1 ? "disabled" : ""}>上一頁</button>`;
+
+      for (let i = 1; i <= totalPages; i++) {
+        html += `<button class="page-btn ${i === currentPage ? "active" : ""}"
+                         data-page="${i}">${i}</button>`;
+      }
+
+      html += `<button class="page-btn" data-page="${currentPage + 1}"
+                 ${currentPage === totalPages ? "disabled" : ""}>下一頁</button>`;
+
+      el.innerHTML = html;
+    }
+
+    // ── 彈窗 ──────────────────────────────────────────────────
+    function openModal(title, content) {
+      document.getElementById("modalTitle").textContent   = title;
+      document.getElementById("modalContent").textContent = safeStr(content) || "無資料";
+      document.getElementById("modalMask").style.display  = "flex";
+      document.body.style.overflow = "hidden";
+    }
+
+    function closeModal() {
+      document.getElementById("modalMask").style.display = "none";
+      document.body.style.overflow = "";
+    }
+
+    function getItemById(id) {
+      return database.find(item => String(item.id) === String(id));
+    }
+
+    // ── 事件綁定 ──────────────────────────────────────────────
+    document.addEventListener("DOMContentLoaded", () => {
+      init();
+
+      document.getElementById("searchInput").addEventListener("input",  search);
+      document.getElementById("yearFilter") .addEventListener("change", search);
+      document.getElementById("typeFilter") .addEventListener("change", search);
+      document.getElementById("sortMode")   .addEventListener("change", search);
+
+      // 表格內容展開（事件委派）
+      document.getElementById("resultsBody").addEventListener("click", e => {
+        const el = e.target.closest("[data-preview]");
+        if (!el) return;
+        const item = getItemById(el.dataset.id);
+        if (!item) return;
+        const field = el.dataset.preview;
+        openModal(
+          field === "content" ? "內容摘要" : "決議摘要",
+          item[field]
+        );
+      });
+
+      // 分頁（事件委派）
+      document.getElementById("pagination").addEventListener("click", e => {
+        const btn = e.target.closest("[data-page]");
+        if (!btn || btn.disabled) return;
+        const p = Number(btn.dataset.page);
+        const total = Math.ceil(filtered.length / PER_PAGE);
+        if (p < 1 || p > total) return;
+        currentPage = p;
+        render();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
+
+      // 彈窗關閉
+      document.getElementById("modalMask")   .addEventListener("click",   e => { if (e.target.id === "modalMask") closeModal(); });
+      document.getElementById("closeModalBtn").addEventListener("click",   closeModal);
+      document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
+    });
+  </script>
+</body>
+</html>
