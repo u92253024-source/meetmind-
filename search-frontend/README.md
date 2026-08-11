@@ -61,7 +61,23 @@ python -m http.server 8000
 無需設定資料庫或伺服器程式。
 
 > ⚠️ PDF 資料夾共 177.4 MB，部署前請確認空間容量與流量限制。
-> ⚠️ 上線前請先處理 `REPORT.md` 中列出的個資遮罩問題。
+
+### 方式 C：同步到 GitHub
+
+本專案的最新版本已同步至
+[github.com/u92253024-source/meetmind-](https://github.com/u92253024-source/meetmind-)
+的 `main` 分支、`search-frontend/` 子資料夾（該 repo 根目錄是另一個負責 PDF 抽取的
+Gemini AI 工具原始碼，兩者共存不衝突）。
+
+日後若在本機修改了 `index.html`／`indextest.html`／`data.json` 等檔案，
+想同步更新到 GitHub，直接執行：
+
+```bash
+bash sync-to-github.sh
+```
+
+腳本會自動複製最新內容進 `search-frontend/`、建立 commit 並推送，
+不會動到 repo 根目錄的其他檔案。執行前會詢問這次更新的簡短說明文字。
 
 ## 四、使用方式
 
