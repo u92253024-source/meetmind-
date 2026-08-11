@@ -342,7 +342,26 @@
       font-size: 14px;
       color: #4b5563;
     }
-    .result-meta { color: #5f6b7a; font-size: 18px; margin-bottom: 16px; }
+    .result-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .result-meta { color: #5f6b7a; font-size: 18px; margin-bottom: 0; }
+    .export-btn {
+      border: 1px solid #cfd8e3;
+      background: #fff;
+      color: #374151;
+      border-radius: 10px;
+      padding: 10px 16px;
+      font-size: 14px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .export-btn:hover { background: #f8fafc; border-color: #b8c4d3; }
  
     .table-wrap {
       width: 100%;
@@ -598,7 +617,10 @@
  
       <section class="panel">
         <h2>搜尋結果</h2>
-        <div id="resultCount" class="result-meta">共 0 筆結果</div>
+        <div class="result-toolbar">
+          <div id="resultCount" class="result-meta">共 0 筆結果</div>
+          <button id="exportCsvBtn" type="button" class="export-btn">匯出目前結果為 CSV</button>
+        </div>
         <div class="table-wrap">
           <table>
             <thead>
@@ -648,11 +670,23 @@
     </div>
  
     <div class="sidebar-body">
+      <!--
+        安全性註記：sandbox 屬性限制此 iframe 只保留 webchat 運作實際需要的權限
+        （執行腳本、維持自己的儲存狀態以保留對話紀錄、送出表單、開啟登入用的彈出視窗）。
+        刻意「不」授權的權限：allow-top-navigation（不能整頁跳轉、劫持使用者離開本站）、
+        allow-modals（不能跳出原生 alert/confirm 對話框）、allow-downloads（不能觸發檔案下載）。
+        referrerpolicy 避免把本頁網址透露給對方網域。
+        但這些都無法阻止有心人直接檢視原始碼取得下方網址並在別處呼叫它——
+        真正的存取控制（僅限校內網域、需要登入等）必須在 Copilot Studio／
+        Power Platform 後台設定，不是前端程式碼能解決的範圍。
+      -->
       <iframe
         id="chatFrame"
         src=""
         data-src="https://copilotstudio.microsoft.com/environments/Default-35157425-5c3c-4672-aaa4-68fb6a8c9612/bots/cr316_MEETMINDCHATBOT/webchat?__version__=2"
         allow="microphone"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+        referrerpolicy="no-referrer"
         title="MeetMind AI 助理">
       </iframe>
  
@@ -661,7 +695,7 @@
           <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
         </div>
         <h3>使用次數已達上限</h3>
-        <p>每位使用者提供 30 次免費諮詢<br>如需繼續使用，請洽教務處承辦人員<br>分機 <strong>62441</strong></p>
+        <p>每位使用者提供 30 次免費開啟機會<br>（每次開啟可於 10 分鐘內詢問多個問題）<br>如需繼續使用，請洽教務處承辦人員<br>分機 <strong>62441</strong></p>
       </div>
     </div>
  
@@ -693,11 +727,18 @@
 // Chatbot 側欄控制（含使用次數 & 冷卻機制）
 // ══════════════════════════════════════════════════
 (function () {
-  /* ── 設定值 ── */
+  /* ── 設定值 ──
+     重要限制（誠實聲明）：這整組次數/冷卻機制都只在瀏覽器端執行，
+     使用者清除瀏覽資料、換瀏覽器或開無痕視窗即可繞過。
+     下面的雙重儲存與逾時自動關閉只能提高「隨手繞過」的門檻，
+     無法達到真正的用量／成本控管。若 Copilot Studio 依訊息數計費，
+     唯一可靠的做法是在伺服器端（Power Automate、Azure Function，
+     或 Copilot Studio 自身的頻道訊息上限設定）驗證，而非仰賴前端數字。 */
   const MAX_USAGE    = 30;
   const COOLDOWN_SEC = 20;
+  const SESSION_MAX_MINUTES = 10; // 單次開啟超過此時間自動關閉，縮小「開一次問無限題」的可乘之機
   const STORAGE_KEY  = "meetmind_usage_v1";
- 
+
   /* ── DOM ── */
   const fab            = document.getElementById("chatFab");
   const sidebar        = document.getElementById("chatSidebar");
@@ -714,29 +755,57 @@
   const sidebarClose   = document.getElementById("sidebarClose");
  
   /* ── 狀態 ── */
-  let isOpen     = false;
-  let loaded     = false;
-  let coolTimer  = null;
-  let coolRemain = 0;
- 
-  /* ── localStorage ── */
+  let isOpen      = false;
+  let loaded      = false;
+  let coolTimer   = null;
+  let coolRemain  = 0;
+  let sessionTimer = null;
+
+  /* ── Cookie 輔助（與 localStorage 雙寫，取兩者較小值）──
+     清除其中一種儲存方式時，另一種仍保留較低的剩餘次數，
+     不會讓次數「回滿」。（無痕視窗仍會完全繞過，見上方聲明。） */
+  function setCookie(name, value, days) {
+    try {
+      const expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toUTCString();
+      document.cookie = `${name}=${encodeURIComponent(value)};expires=${expires};path=/;SameSite=Lax`;
+    } catch {}
+  }
+  function getCookie(name) {
+    try {
+      const m = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
+      return m ? decodeURIComponent(m[1]) : null;
+    } catch { return null; }
+  }
+
   function loadUsage() {
+    let ls = MAX_USAGE, ck = MAX_USAGE;
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return MAX_USAGE;
-      const d = JSON.parse(raw);
-      return typeof d.remaining === "number" ? d.remaining : MAX_USAGE;
-    } catch { return MAX_USAGE; }
+      if (raw) {
+        const d = JSON.parse(raw);
+        if (typeof d.remaining === "number") ls = d.remaining;
+      }
+    } catch {}
+    const ckRaw = getCookie(STORAGE_KEY);
+    if (ckRaw !== null) {
+      const n = Number(ckRaw);
+      if (!Number.isNaN(n)) ck = n;
+    }
+    return Math.min(ls, ck);
   }
   function saveUsage(n) {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ remaining: n })); } catch {}
+    setCookie(STORAGE_KEY, String(n), 365);
   }
- 
+
   let remaining = loadUsage();
- 
-  /* ── 更新次數標籤 ── */
+
+  /* ── 更新次數標籤 ──
+     文案改為「次開啟機會」而非模糊的「次」：
+     單位是「開啟側欄的次數」，同一次開啟內可詢問多個問題，
+     不是逐訊息計費，避免使用者或管理端誤解為訊息配額。 */
   function updateUsageTag() {
-    usageTag.textContent = `剩餘 ${remaining} 次`;
+    usageTag.textContent = `剩餘 ${remaining} 次開啟機會`;
     usageTag.className   = "";
     if (remaining <= 5)       usageTag.classList.add("danger");
     else if (remaining <= 10) usageTag.classList.add("warn");
@@ -804,18 +873,23 @@
     iconClose.style.display = "block";
     badge.style.display     = "none";
     fab.setAttribute("aria-expanded", "true");
- 
+
+    // 逾時自動關閉：降低「開一次側欄、在時效內問無限問題」只算 1 次的曝險
+    clearTimeout(sessionTimer);
+    sessionTimer = setTimeout(() => { if (isOpen) closeSidebar(); }, SESSION_MAX_MINUTES * 60 * 1000);
+
     if (remaining <= 0) setTimeout(showExhausted, 400);
   }
- 
+
   /* ── 關閉側欄 ── */
   function closeSidebar() {
     if (!isOpen) return;
     isOpen = false;
+    clearTimeout(sessionTimer);
     sidebar.classList.remove("open");
     fab.classList.remove("shifted");
     fab.setAttribute("aria-expanded", "false");
- 
+
     if (remaining <= 0) { showExhausted(); return; }
     startCooldown(COOLDOWN_SEC);
   }
@@ -854,7 +928,9 @@ async function init() {
     const res = await fetch("data.json");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     database = await res.json();
-    prepareData(); buildYearFilter(); renderEmpty();
+    prepareData(); buildYearFilter();
+    const hasState = loadUrlState();
+    if (hasState) search(); else renderEmpty();
   } catch (e) {
     document.getElementById("resultsBody").innerHTML =
       '<tr><td colspan="8" class="empty">無法讀取 data.json，請確認檔案位置是否正確。</td></tr>';
@@ -902,13 +978,17 @@ function extractProposalNum(t) {
   return 9999;
 }
  
-function detectType(t) {
+// 多標籤分類：一個提案可同時符合多種類型（如「申請修正○○辦法」同時是修訂與申請），
+// 各類型獨立比對、不互斥；完全無命中才歸入「其他」。
+function detectTypes(t) {
   const s=safeStr(t);
-  if(/修正|修訂|修訂案|條文修正|辦法修正/.test(s)) return "修訂";
-  if(/申請|擬申請|申辦/.test(s))                    return "申請";
-  if(/報告|提請核備|核備|工作報告/.test(s))          return "報告";
-  if(/新增|新設|新開|增設|設立|成立/.test(s))        return "新增";
-  return "其他";
+  const types=[];
+  if(/修正|修訂|修訂案|條文修正|辦法修正|調整|修改|變更|廢止|廢除|停招|停止|終止/.test(s)) types.push("修訂");
+  if(/申請|擬申請|申辦|續約/.test(s))                                                     types.push("申請");
+  if(/報告|提請核備|核備|工作報告|備查|追認/.test(s))                                         types.push("報告");
+  if(/新增|新設|新開|增設|設立|成立|訂定|擬訂|擬定|制定|簽訂|合作/.test(s))                     types.push("新增");
+  if(!types.length) types.push("其他");
+  return types;
 }
  
 function prepareData() {
@@ -919,9 +999,9 @@ function prepareData() {
           id=safeStr(item.id)||`row_${i}`,
           year=extractYear(meetingName), semester=extractSemester(meetingName),
           seq=extractSeq(meetingName), proposalNum=extractProposalNum(title),
-          type=detectType(title),
+          types=detectTypes(title),
           searchText=[title,content,result,unit,meetingName,fileName,id].join(" ").toLowerCase();
-    return {...item,meetingName,title,unit,content,result,fileName,id,year,semester,seq,proposalNum,type,searchText};
+    return {...item,meetingName,title,unit,content,result,fileName,id,year,semester,seq,proposalNum,types,searchText};
   });
 }
  
@@ -967,16 +1047,45 @@ function search() {
   const year=document.getElementById("yearFilter").value;
   const type=document.getElementById("typeFilter").value;
   const {terms,excludes}=parseQuery(document.getElementById("searchInput").value);
-  if(!terms.length&&!excludes.length&&!year&&!type){filtered=[];currentPage=1;renderEmpty();return;}
+  if(!terms.length&&!excludes.length&&!year&&!type){filtered=[];currentPage=1;renderEmpty();syncUrlState();return;}
   filtered=database.filter(item=>{
     if(year&&item.year!==year) return false;
-    if(type&&item.type!==type) return false;
+    if(type&&!item.types.includes(type)) return false;
     for(const t of terms)    if(!item.searchText.includes(t)) return false;
     for(const t of excludes) if(item.searchText.includes(t))  return false;
     return true;
   });
   filtered=isRelevanceMode(terms)?rankByScore(filtered,terms):sortResults(filtered);
   currentPage=1; render();
+  syncUrlState();
+}
+
+// ── URL 查詢狀態（可分享連結、瀏覽器上一頁可還原搜尋）────────
+// 用 replaceState 而非 pushState：避免每敲一個字就塞爆瀏覽器歷史紀錄。
+function syncUrlState() {
+  const q=document.getElementById("searchInput").value;
+  const year=document.getElementById("yearFilter").value;
+  const type=document.getElementById("typeFilter").value;
+  const sort=document.getElementById("sortMode").value;
+  const params=new URLSearchParams();
+  if(q) params.set("q",q);
+  if(year) params.set("year",year);
+  if(type) params.set("type",type);
+  if(sort && sort!=="relevance") params.set("sort",sort);
+  const qs=params.toString();
+  history.replaceState(null,"",location.pathname+(qs?`?${qs}`:""));
+}
+
+// 回傳是否讀到任何有效條件，供 init() 決定要不要立即執行搜尋
+function loadUrlState() {
+  const params=new URLSearchParams(location.search);
+  const q=params.get("q")||"", year=params.get("year")||"",
+        type=params.get("type")||"", sort=params.get("sort")||"relevance";
+  document.getElementById("searchInput").value=q;
+  if(year) document.getElementById("yearFilter").value=year;
+  if(type) document.getElementById("typeFilter").value=type;
+  document.getElementById("sortMode").value=sort;
+  return Boolean(q||year||type);
 }
 
 // 相關度加權排序：案由×5、內容×3、決議×2、單位×1、會議×1，多關鍵字分數累加；
@@ -1015,6 +1124,26 @@ function highlight(text,terms){
   return e.replace(new RegExp(`(${pattern})`,"gi"),"<mark>$1</mark>");
 }
 function shorten(text,max=90){const s=safeStr(text);return s.length>max?s.slice(0,max)+"…":s;}
+
+// 摘要以命中關鍵字為中心取前後文（keyword-in-context），
+// 避免關鍵字出現在固定截斷點之後時完全看不到高亮。無關鍵字時退回原本開頭截斷。
+function contextSnippet(text, terms, radius=45) {
+  const s=safeStr(text);
+  if(!terms||!terms.length) return shorten(s, radius*2);
+  const lower=s.toLowerCase();
+  let hitPos=-1;
+  for(const t of terms){
+    if(!t) continue;
+    const idx=lower.indexOf(t.toLowerCase());
+    if(idx!==-1 && (hitPos===-1||idx<hitPos)) hitPos=idx;
+  }
+  if(hitPos===-1) return shorten(s, radius*2);
+  const start=Math.max(0, hitPos-radius), end=Math.min(s.length, hitPos+radius);
+  let snippet=s.slice(start,end);
+  if(start>0) snippet="…"+snippet;
+  if(end<s.length) snippet=snippet+"…";
+  return snippet;
+}
  
 function renderEmpty(){
   document.getElementById("resultCount").textContent="共 0 筆結果";
@@ -1044,8 +1173,8 @@ function renderTable(){
       <td>${escapeHtml(item.meetingName)}</td>
       <td>${escapeHtml(item.unit)}</td>
       <td>${highlight(item.title,terms)}</td>
-      <td><span class="summary-link" data-preview="content" data-id="${escapeHtml(item.id)}">${highlight(shorten(item.content),terms)}</span></td>
-      <td><span class="summary-link" data-preview="result"  data-id="${escapeHtml(item.id)}">${highlight(shorten(item.result),terms)}</span></td>
+      <td><span class="summary-link" data-preview="content" data-id="${escapeHtml(item.id)}">${highlight(contextSnippet(item.content,terms),terms)}</span></td>
+      <td><span class="summary-link" data-preview="result"  data-id="${escapeHtml(item.id)}">${highlight(contextSnippet(item.result,terms),terms)}</span></td>
       <td class="col-page">${item.page!=null?`<span class="page-tag">第 ${escapeHtml(String(item.page))} 頁</span>`:'<span style="color:#9ca3af">—</span>'}</td>
       <td class="col-pdf">${pdfCell}</td>
     </tr>`;
@@ -1073,6 +1202,28 @@ function closeModal(){
   document.body.style.overflow="";
 }
 function getItemById(id){return database.find(item=>String(item.id)===String(id));}
+
+// ── CSV 匯出（匯出目前篩選後的「全部」結果，非僅當前頁）────
+function escapeCsvField(v){
+  const s=safeStr(v).replace(/\r?\n/g," ");
+  return `"${s.replace(/"/g,'""')}"`;
+}
+function exportCsv(){
+  if(!filtered.length){ alert("目前沒有可匯出的結果，請先輸入關鍵字或設定篩選條件。"); return; }
+  const header=["年度","會議","單位","案由","內容","決議","頁碼","PDF"];
+  const rows=filtered.map(item=>[
+    item.year, item.meetingName, item.unit, item.title, item.content, item.result,
+    item.page!=null?item.page:"", item.fileName?`pdf/${item.fileName}`:""
+  ]);
+  const csv=[header,...rows].map(row=>row.map(escapeCsvField).join(",")).join("\r\n");
+  const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  const ts=new Date().toISOString().slice(0,10);
+  a.href=url; a.download=`教務會議搜尋結果_${ts}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
  
 document.addEventListener("DOMContentLoaded",()=>{
   init();
@@ -1080,6 +1231,7 @@ document.addEventListener("DOMContentLoaded",()=>{
   document.getElementById("yearFilter").addEventListener("change",search);
   document.getElementById("typeFilter").addEventListener("change",search);
   document.getElementById("sortMode").addEventListener("change",search);
+  document.getElementById("exportCsvBtn").addEventListener("click",exportCsv);
 
   document.getElementById("resultsBody").addEventListener("click",e=>{
     const el=e.target.closest("[data-preview]"); if(!el) return;

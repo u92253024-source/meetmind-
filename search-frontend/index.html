@@ -91,10 +91,35 @@
       color: #4b5563;
     }
 
+    .result-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
     .result-meta {
       color: #5f6b7a;
       font-size: 18px;
-      margin-bottom: 16px;
+      margin-bottom: 0;
+    }
+
+    .export-btn {
+      border: 1px solid #cfd8e3;
+      background: #fff;
+      color: #374151;
+      border-radius: 10px;
+      padding: 10px 16px;
+      font-size: 14px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .export-btn:hover {
+      background: #f8fafc;
+      border-color: #b8c4d3;
     }
 
     .table-wrap {
@@ -352,7 +377,10 @@
 
     <section class="panel">
       <h2>搜尋結果</h2>
-      <div id="resultCount" class="result-meta">共 0 筆結果</div>
+      <div class="result-toolbar">
+        <div id="resultCount" class="result-meta">共 0 筆結果</div>
+        <button id="exportCsvBtn" type="button" class="export-btn">匯出目前結果為 CSV</button>
+      </div>
       <div class="table-wrap">
         <table>
           <thead>
@@ -403,12 +431,48 @@
         database = await res.json();
         prepareData();
         buildYearFilter();
-        renderEmpty();
+        const hasState = loadUrlState();
+        if (hasState) search(); else renderEmpty();
       } catch (e) {
         console.error("初始化失敗：", e);
         document.getElementById("resultsBody").innerHTML =
           '<tr><td colspan="7" class="empty">無法讀取 data.json，請確認檔案位置是否正確。</td></tr>';
       }
+    }
+
+    // ── URL 查詢狀態（可分享連結、瀏覽器上一頁可還原搜尋）────────
+    // 用 replaceState 而非 pushState：避免每敲一個字就塞爆瀏覽器歷史紀錄。
+    function syncUrlState() {
+      const q    = document.getElementById("searchInput").value;
+      const year = document.getElementById("yearFilter").value;
+      const type = document.getElementById("typeFilter").value;
+      const sort = document.getElementById("sortMode").value;
+
+      const params = new URLSearchParams();
+      if (q)    params.set("q", q);
+      if (year) params.set("year", year);
+      if (type) params.set("type", type);
+      if (sort && sort !== "relevance") params.set("sort", sort);
+
+      const qs = params.toString();
+      const newUrl = location.pathname + (qs ? `?${qs}` : "");
+      history.replaceState(null, "", newUrl);
+    }
+
+    // 回傳是否讀到任何有效條件，供 init() 決定要不要立即執行搜尋
+    function loadUrlState() {
+      const params = new URLSearchParams(location.search);
+      const q    = params.get("q")    || "";
+      const year = params.get("year") || "";
+      const type = params.get("type") || "";
+      const sort = params.get("sort") || "relevance";
+
+      document.getElementById("searchInput").value = q;
+      if (year) document.getElementById("yearFilter").value = year;
+      if (type) document.getElementById("typeFilter").value = type;
+      document.getElementById("sortMode").value = sort;
+
+      return Boolean(q || year || type);
     }
 
     // ── 資料前處理 ────────────────────────────────────────────
@@ -478,13 +542,17 @@
       return 9999;
     }
 
-    function detectType(title) {
+    // 多標籤分類：一個提案可同時符合多種類型（如「申請修正○○辦法」同時是修訂與申請），
+    // 各類型獨立比對、不互斥；完全無命中才歸入「其他」。
+    function detectTypes(title) {
       const t = safeStr(title);
-      if (/修正|修訂|修訂案|條文修正|辦法修正/.test(t)) return "修訂";
-      if (/申請|擬申請|申辦/.test(t))                    return "申請";
-      if (/報告|提請核備|核備|工作報告/.test(t))          return "報告";
-      if (/新增|新設|新開|增設|設立|成立/.test(t))        return "新增";
-      return "其他";
+      const types = [];
+      if (/修正|修訂|修訂案|條文修正|辦法修正|調整|修改|變更|廢止|廢除|停招|停止|終止/.test(t)) types.push("修訂");
+      if (/申請|擬申請|申辦|續約/.test(t))                                                       types.push("申請");
+      if (/報告|提請核備|核備|工作報告|備查|追認/.test(t))                                          types.push("報告");
+      if (/新增|新設|新開|增設|設立|成立|訂定|擬訂|擬定|制定|簽訂|合作/.test(t))                      types.push("新增");
+      if (!types.length) types.push("其他");
+      return types;
     }
 
     function prepareData() {
@@ -500,7 +568,7 @@
         const semester    = extractSemester(meetingName);
         const seq         = extractSeq(meetingName);
         const proposalNum = extractProposalNum(title);
-        const type        = detectType(title);
+        const types       = detectTypes(title);
 
         // 全文搜尋字串（小寫，供 includes 比對）
         const searchText = [
@@ -510,7 +578,7 @@
         return {
           ...item,
           meetingName, title, unit, content, result, fileName, id,
-          year, semester, seq, proposalNum, type, searchText
+          year, semester, seq, proposalNum, types, searchText
         };
       });
     }
@@ -580,12 +648,13 @@
         filtered = [];
         currentPage = 1;
         renderEmpty();
+        syncUrlState();
         return;
       }
 
       filtered = database.filter(item => {
         if (year && item.year !== year) return false;
-        if (type && item.type !== type) return false;
+        if (type && !item.types.includes(type)) return false;
         // 多關鍵字：全部都要命中
         for (const t of terms)    if (!item.searchText.includes(t)) return false;
         // 排除詞：命中任一即剔除
@@ -600,6 +669,7 @@
 
       currentPage = 1;
       render();
+      syncUrlState();
     }
 
     // ── 相關度加權排序 ────────────────────────────────────────
@@ -663,6 +733,29 @@
       return s.length > max ? s.slice(0, max) + "…" : s;
     }
 
+    // 摘要以命中關鍵字為中心取前後文（keyword-in-context），
+    // 避免關鍵字出現在固定截斷點之後時完全看不到高亮。無關鍵字時退回原本開頭截斷。
+    function contextSnippet(text, terms, radius = 45) {
+      const s = safeStr(text);
+      if (!terms || !terms.length) return shorten(s, radius * 2);
+
+      const lower = s.toLowerCase();
+      let hitPos = -1;
+      for (const t of terms) {
+        if (!t) continue;
+        const idx = lower.indexOf(t.toLowerCase());
+        if (idx !== -1 && (hitPos === -1 || idx < hitPos)) hitPos = idx;
+      }
+      if (hitPos === -1) return shorten(s, radius * 2);
+
+      const start = Math.max(0, hitPos - radius);
+      const end   = Math.min(s.length, hitPos + radius);
+      let snippet = s.slice(start, end);
+      if (start > 0) snippet = "…" + snippet;
+      if (end < s.length) snippet = snippet + "…";
+      return snippet;
+    }
+
     function renderEmpty() {
       document.getElementById("resultCount").textContent = "共 0 筆結果";
       document.getElementById("resultsBody").innerHTML =
@@ -708,14 +801,14 @@
               <span class="summary-link"
                     data-preview="content"
                     data-id="${escapeHtml(item.id)}">
-                ${highlight(shorten(item.content), terms)}
+                ${highlight(contextSnippet(item.content, terms), terms)}
               </span>
             </td>
             <td>
               <span class="summary-link"
                     data-preview="result"
                     data-id="${escapeHtml(item.id)}">
-                ${highlight(shorten(item.result), terms)}
+                ${highlight(contextSnippet(item.result, terms), terms)}
               </span>
             </td>
             <td class="col-page">
@@ -768,6 +861,47 @@
       return database.find(item => String(item.id) === String(id));
     }
 
+    // ── CSV 匯出（匯出目前篩選後的「全部」結果，非僅當前頁）────
+    function escapeCsvField(v) {
+      const s = safeStr(v).replace(/\r?\n/g, " ");
+      return `"${s.replace(/"/g, '""')}"`;
+    }
+
+    function exportCsv() {
+      if (!filtered.length) {
+        alert("目前沒有可匯出的結果，請先輸入關鍵字或設定篩選條件。");
+        return;
+      }
+
+      const header = ["年度", "會議", "單位", "案由", "內容", "決議", "頁碼", "PDF"];
+      const rows = filtered.map(item => [
+        item.year,
+        item.meetingName,
+        item.unit,
+        item.title,
+        item.content,
+        item.result,
+        item.page != null ? item.page : "",
+        item.fileName ? `pdf/${item.fileName}` : ""
+      ]);
+
+      const csv = [header, ...rows]
+        .map(row => row.map(escapeCsvField).join(","))
+        .join("\r\n");
+
+      // 前綴 BOM，確保 Excel 開啟時中文不會變亂碼
+      const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      const ts   = new Date().toISOString().slice(0, 10);
+      a.href     = url;
+      a.download = `教務會議搜尋結果_${ts}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
     // ── 事件綁定 ──────────────────────────────────────────────
     document.addEventListener("DOMContentLoaded", () => {
       init();
@@ -776,6 +910,7 @@
       document.getElementById("yearFilter") .addEventListener("change", search);
       document.getElementById("typeFilter") .addEventListener("change", search);
       document.getElementById("sortMode")   .addEventListener("change", search);
+      document.getElementById("exportCsvBtn").addEventListener("click", exportCsv);
 
       // 表格內容展開（事件委派）
       document.getElementById("resultsBody").addEventListener("click", e => {

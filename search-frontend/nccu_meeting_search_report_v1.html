@@ -264,10 +264,10 @@
     <h3>評分概觀</h3>
     <div class="score">
       <div class="score-row"><span class="name">資料完整度</span><span class="stars">★★★★★</span><span class="note">8 欄位 983 筆零空值、ID 零重複、PDF 連結零死鏈</span></div>
-      <div class="score-row"><span class="name">抽取正確性</span><span class="stars">★★★★☆</span><span class="note">抽查 4 份 PDF 全數正確；僅 95 學年度有一組重複</span></div>
+      <div class="score-row"><span class="name">抽取正確性</span><span class="stars">★★★★★</span><span class="note">抽查 4 份 PDF 全數正確；95 學年度重複已於 2026-08-11 修復</span></div>
       <div class="score-row"><span class="name">溯源可稽核性</span><span class="stars">★★★★★</span><span class="note">每筆可回溯至 PDF 頁碼，同類 AI 作品最缺的一環</span></div>
-      <div class="score-row"><span class="name">程式安全性</span><span class="stars">★★★★☆</span><span class="note">逸出處理完整、無 XSS；但 AI 端點與用量控管在前端裸露</span></div>
-      <div class="score-row"><span class="name">搜尋體驗</span><span class="stars">★★★★☆</span><span class="note">多關鍵字與相關度排序已補上；摘要截斷仍造成「搜到卻看不到」</span></div>
+      <div class="score-row"><span class="name">程式安全性</span><span class="stars">★★★★☆</span><span class="note">逸出處理完整、無 XSS；AI 端點已加 sandbox／雙重用量加固，純前端架構仍有無法根除的限制</span></div>
+      <div class="score-row"><span class="name">搜尋體驗</span><span class="stars">★★★★★</span><span class="note">多關鍵字、相關度排序、關鍵字前後文摘要、多標籤分類、URL 分享、CSV 匯出皆已補上</span></div>
       <div class="score-row"><span class="name">可維護性</span><span class="stars">★★☆☆☆</span><span class="note">兩份檔案各複製一份邏輯、非 git 專案、無抽取腳本</span></div>
       <div class="score-row"><span class="name">法規合規</span><span class="stars">★★★★☆</span><span class="note">9 筆學生姓名／學號已遮罩；代表連署具名紀錄經確認保留</span></div>
       <div class="score-row"><span class="name">文件完整度</span><span class="stars">★★★☆☆</span><span class="note">原無任何文件，本次已補 README / SPEC / 本報告</span></div>
@@ -406,23 +406,36 @@
     <p><code>pdf/95-臨時.pdf</code> 實體檔案未刪除（刪檔案屬不可逆操作），目前無任何紀錄引用它。</p>
   </div>
 
-  <div class="card bad">
-    <h3>3.3　AI 助理的使用次數上限形同虛設<span class="tag p0">P0</span></h3>
+  <div class="card warn">
+    <h3>3.3　AI 助理的使用次數上限形同虛設<span class="tag ok">已加固 2026-08-11</span><span class="tag p1">非完整修復</span></h3>
+    <p>原本兩個問題：</p>
     <ol>
       <li><strong>計數存在 localStorage</strong>：清除瀏覽資料、換瀏覽器或開無痕視窗即歸零</li>
       <li><strong>計數單位錯誤</strong>：扣的是「開啟側欄次數」而非「提問次數」——
         開啟一次後可以在裡面問一百個問題，只算 1 次</li>
     </ol>
-    <p>若 Copilot Studio 按訊息數計費，這個機制無法達成成本控管目的。</p>
-    <p><strong>建議</strong>：前端計數僅保留為提示，實際限制改由伺服器端（Power Automate 或 Azure Function）依帳號驗證。</p>
+    <p><strong>這一項跟其他項目不同，沒有「完整修復」，只有「盡力加固」</strong>：
+    純前端、無後端的靜態網頁架構本質上就無法做到可靠的用量控管，
+    使用者清除瀏覽資料或開無痕視窗一樣能繞過，這是架構限制，不是程式碼問題。</p>
+    <p><strong>已完成</strong>：次數同時寫入 localStorage 與 cookie（取兩者較小值，
+    清一種儲存不會讓次數回滿，實測驗證）；單次開啟 10 分鐘後自動關閉，縮小
+    「開一次問無限題」的曝險窗口；文案改為「剩餘 N 次開啟機會」，避免使用者誤解為逐訊息計費。</p>
+    <p><strong>做不到的部分</strong>：若 Copilot Studio 依訊息數計費，唯一可靠做法是伺服器端
+    （Power Automate、Azure Function，或 Copilot Studio 頻道本身的訊息上限設定）驗證，
+    這需要 Power Platform 後台存取權限，已在程式碼註解中明確聲明此限制。</p>
   </div>
 
-  <div class="card bad">
-    <h3>3.4　Copilot Studio 端點與環境 ID 硬編碼在前端<span class="tag p0">P0</span></h3>
-    <p><code>indextest.html</code> 第 637 行的 iframe <code>data-src</code> 直接包含環境 GUID 與機器人名稱，
-    任何人檢視原始碼即可取得，可直接呼叫該 webchat 端點、完全繞過前端的次數與冷卻限制。
-    iframe 也未設定 <code>sandbox</code>，且開放了 <code>allow="microphone"</code>。</p>
-    <p><strong>建議</strong>：若該端點可設定存取控制（僅限校內網域或需登入），務必開啟。</p>
+  <div class="card warn">
+    <h3>3.4　Copilot Studio 端點與環境 ID 硬編碼在前端<span class="tag ok">已加固 2026-08-11</span><span class="tag p1">無法完全修復</span></h3>
+    <p><code>indextest.html</code> 的 iframe <code>data-src</code> 直接包含環境 GUID 與機器人名稱，
+    任何人檢視原始碼即可取得。<strong>這點本質上無法用程式碼修復</strong>：iframe 要嵌入這個
+    webchat，網址就必須送到瀏覽器端，藏在哪一行程式碼都一樣拿得到。</p>
+    <p><strong>已完成</strong>：原本沒有 <code>sandbox</code> 屬性，現已加上
+    <code>sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"</code>
+    與 <code>referrerpolicy="no-referrer"</code>，刻意不開放整頁跳轉、原生對話框、觸發下載等權限；
+    保留 <code>allow-same-origin</code> 是刻意取捨，避免拿掉後聊天元件無法維持對話狀態而直接壞掉。</p>
+    <p><strong>做不到的部分</strong>：真正的存取控制（僅限校內網域、需要登入）必須到
+    Copilot Studio／Power Platform 後台的頻道安全性設定裡做，不是修改 HTML 檔案能達成的。</p>
   </div>
 
   <div class="card good">
@@ -445,13 +458,13 @@
     <p>驗證：19 項自動化測試（以真實 999 筆資料執行）＋ 三種螢幕寬度瀏覽器實測，全數通過。</p>
   </div>
 
-  <div class="card warn">
-    <h3>3.6　摘要固定截斷 90 字，造成「搜到卻看不到」<span class="tag p1">P1</span></h3>
-    <p>表格摘要只顯示前 90 字，高亮也只作用在顯示出來的部分。關鍵字若在第 90 字之後，
+  <div class="card good">
+    <h3>3.6　摘要固定截斷 90 字，造成「搜到卻看不到」<span class="tag ok">已修復 2026-08-11</span></h3>
+    <p>表格摘要原本只顯示前 90 字，高亮也只作用在顯示出來的部分。關鍵字若在第 90 字之後，
     整列都不會有任何高亮，使用者會以為系統誤判：</p>
     <div class="tw">
       <table>
-        <thead><tr><th>關鍵字</th><th class="num">命中</th><th class="num">看不到關鍵字</th><th class="num">比例</th></tr></thead>
+        <thead><tr><th>關鍵字</th><th class="num">命中</th><th class="num">修復前看不到關鍵字</th><th class="num">比例</th></tr></thead>
         <tbody>
           <tr><td>學則</td><td class="num">40</td><td class="num">8</td><td class="num miss">20%</td></tr>
           <tr><td>學分學程</td><td class="num">95</td><td class="num">15</td><td class="num miss">16%</td></tr>
@@ -460,16 +473,18 @@
         </tbody>
       </table>
     </div>
-    <p><strong>建議</strong>：摘要改以命中關鍵字為中心取前後文（keyword-in-context），而非固定取開頭。</p>
+    <p><strong>已實作</strong>：新增 <code>contextSnippet()</code>，摘要改以命中關鍵字為中心取前後文
+    （keyword-in-context，前後各約 45 字），而非固定取開頭；無關鍵字時退回原本開頭截斷。
+    驗證：對上表 4 個關鍵字重新抽查，摘要片段全部包含高亮關鍵字。</p>
   </div>
 
-  <div class="card warn">
-    <h3>3.7　類型篩選近半數落入「其他」<span class="tag p1">P1</span></h3>
+  <div class="card good">
+    <h3>3.7　類型篩選近半數落入「其他」<span class="tag ok">已修復 2026-08-11</span></h3>
     <div class="tw">
       <table>
-        <thead><tr><th>類型</th><th class="num">筆數</th><th class="num">占比</th></tr></thead>
+        <thead><tr><th>類型</th><th class="num">修復前筆數</th><th class="num">修復前占比</th></tr></thead>
         <tbody>
-          <tr><td>其他</td><td class="num">496</td><td class="num miss">49.6%</td></tr>
+          <tr><td>其他</td><td class="num">490</td><td class="num miss">49.8%</td></tr>
           <tr><td>修訂</td><td class="num">292</td><td class="num">29.2%</td></tr>
           <tr><td>申請</td><td class="num">112</td><td class="num">11.2%</td></tr>
           <tr><td>報告</td><td class="num">66</td><td class="num">6.6%</td></tr>
@@ -477,10 +492,26 @@
         </tbody>
       </table>
     </div>
-    <p>且採固定優先序單標籤（修訂 &gt; 申請 &gt; 報告 &gt; 新增），
+    <p>原本採固定優先序單標籤（修訂 &gt; 申請 &gt; 報告 &gt; 新增），
     「申請修正○○辦法」會被歸為「修訂」而非「申請」。</p>
-    <p><strong>建議</strong>：改為多標籤，並針對「其他」那 496 筆補上教務常見動作詞
-    （廢止、核備、追認、續約、停招、備查…）。</p>
+    <p><strong>已實作</strong>：<code>detectType()</code> 改為 <code>detectTypes()</code> 回傳陣列，
+    一個提案可同時符合多種類型，各自獨立比對、不互斥；並依實際資料分析擴充比對關鍵字
+    （修訂新增「調整、修改、變更、廢止、停招」；申請新增「續約」；報告新增「備查、追認」；
+    新增新增「訂定、擬訂、簽訂、合作」）。</p>
+    <div class="tw">
+      <table>
+        <thead><tr><th>修復後類型</th><th class="num">筆數</th><th class="num">占比</th></tr></thead>
+        <tbody>
+          <tr><td>修訂</td><td class="num">343</td><td class="num">34.9%</td></tr>
+          <tr><td>新增</td><td class="num">302</td><td class="num">30.7%</td></tr>
+          <tr><td><strong>其他</strong></td><td class="num hit">259</td><td class="num hit">26.3%</td></tr>
+          <tr><td>報告</td><td class="num">162</td><td class="num">16.5%</td></tr>
+          <tr><td>申請</td><td class="num">117</td><td class="num">11.9%</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>187 筆現在具備多重標籤（如「擬修正…僑生申請入學…審查作業要點」同時歸為修訂＋申請）；
+    抽樣殘留的「其他」259 筆多為純程序性決議案，確實缺乏明確動作詞，未勉強硬塞分類。</p>
   </div>
 
   <div class="card warn">
@@ -501,10 +532,19 @@
     <p>這使「哪個單位提案最多」這類分析無法進行——而這恰好是主管最想看的視角。</p>
   </div>
 
-  <div class="card warn">
-    <h3>3.9　搜尋結果無法分享，也無法匯出<span class="tag p1">P1</span></h3>
-    <p>沒有 URL 查詢參數，查到關鍵決議後無法把連結貼給同事，瀏覽器上一頁也不會回到前一次搜尋。
-    同時沒有 CSV／Excel 匯出。行政實務上查到決議後的下一步通常是「貼進簽呈」，目前會卡在這裡。</p>
+  <div class="card good">
+    <h3>3.9　搜尋結果無法分享，也無法匯出<span class="tag ok">已修復 2026-08-11</span></h3>
+    <p>原本沒有 URL 查詢參數，查到關鍵決議後無法把連結貼給同事，瀏覽器上一頁也不會回到前一次搜尋。
+    同時沒有 CSV／Excel 匯出。行政實務上查到決議後的下一步通常是「貼進簽呈」，原本會卡在這裡。</p>
+    <p><strong>已實作</strong>：</p>
+    <ul>
+      <li><strong>URL 分享狀態</strong>：關鍵字、年度、類型、排序方式同步寫入網址（用
+        <code>replaceState</code> 避免每敲一字就塞爆瀏覽器歷史紀錄）；開啟含參數的連結會自動還原
+        並立即執行搜尋。驗證：<code>?q=學則+修正&amp;year=113</code> 開啟後正確還原並顯示 2 筆結果。</li>
+      <li><strong>CSV 匯出</strong>：新增按鈕匯出<strong>目前篩選後的全部結果</strong>（非僅當前頁），
+        含年度／會議／單位／案由／內容／決議／頁碼／PDF 路徑，加 UTF-8 BOM 確保 Excel 開啟中文不亂碼。
+        驗證：實際下載內容經瀏覽器層級攔截確認欄位與 BOM 皆正確；無結果時改跳提示，不產生空白檔案。</li>
+    </ul>
   </div>
 
   <div class="card warn">
@@ -588,8 +628,10 @@
           <tr><td class="num">2</td><td>接上 <code>rankByScore()</code> 相關度排序</td><td>3.12</td><td><span class="hit">✅ 已完成</span></td></tr>
           <tr><td class="num">3</td><td>個資遮罩（姓名、學號）</td><td>3.1</td><td><span class="hit">✅ 已完成</span></td></tr>
           <tr><td class="num">4</td><td>刪除 95 學年度重複的 16 筆</td><td>3.2</td><td><span class="hit">✅ 已完成</span></td></tr>
-          <tr><td class="num">5</td><td>摘要改為關鍵字前後文</td><td>3.6</td><td>待處理 — 約 15 行程式</td></tr>
+          <tr><td class="num">5</td><td>摘要改為關鍵字前後文</td><td>3.6</td><td><span class="hit">✅ 已完成</span></td></tr>
           <tr><td class="num">6</td><td>補「資料抽取方法論」文件</td><td>3.18</td><td><span class="hit">✅ 已完成</span></td></tr>
+          <tr><td class="num">11</td><td>類型多標籤分類</td><td>3.7</td><td><span class="hit">✅ 已完成</span></td></tr>
+          <tr><td class="num">12</td><td>URL 狀態與 CSV 匯出</td><td>3.9</td><td><span class="hit">✅ 已完成</span></td></tr>
         </tbody>
       </table>
     </div>
@@ -598,14 +640,13 @@
   <div class="card">
     <h3>上線前必做</h3>
     <ul>
-      <li>用量控管改伺服器端驗證（3.3）</li>
-      <li>Copilot Studio 端點存取控制（3.4）</li>
-      <li><code>git init</code> 並合併兩份重複邏輯（3.10）</li>
+      <li>用量控管改伺服器端驗證（3.3）——<span class="hit">已加固</span>，但純前端架構無法根除，需伺服器端才能完整解決</li>
+      <li>Copilot Studio 端點存取控制（3.4）——<span class="hit">已加固</span>（iframe sandbox），網域/租戶限制須到 Power Platform 後台設定</li>
+      <li><code>git init</code>（3.10）——<span class="hit">已完成</span>；兩份檔案共用邏輯的合併尚待處理</li>
       <li>無障礙修正（3.15）</li>
     </ul>
     <h3 style="margin-top:18px">後續版本</h3>
-    <p>單位正規化與篩選器（3.8）、URL 狀態與 CSV 匯出（3.9）、類型多標籤（3.7）、
-    省略式分頁（3.13）、debounce（3.14）、PDF 外部化（3.17）。</p>
+    <p>單位正規化與篩選器（3.8）、省略式分頁（3.13）、debounce（3.14）、PDF 外部化（3.17）。</p>
   </div>
 </section>
 
