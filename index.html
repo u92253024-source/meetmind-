@@ -1,13 +1,2291 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Google AI Studio App</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>教務會議資料庫搜尋系統 (MeetMind v3.1 雲端版)</title>
+  <style>
+    /* ═══════════════════════════════════════════════════════════
+       教務會議資料庫搜尋系統 v3.1（雲端自動同步版）
+       整合來源：v3.0 + Google 雲端硬碟與 Google Apps Script (GAS) 零維護中繼
+       ─────────────────────────────────────────────────────────
+       版面結構：
+         #layoutWrapper ─┬─ #mainContent（含頁籤：資料搜尋／AI 問答）
+                         └─ #chatSidebar（Copilot Studio AI 助理側欄）
+         #modalMask（內容展開彈窗，恆在最上層）
+         #chatFab（右下角浮動按鈕，開合側欄）
+       ═══════════════════════════════════════════════════════════ */
 
+    /* ── 0. 全域重置 ────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; }
+
+    [hidden] { display: none !important; }
+
+    body {
+      font-family: "Noto Sans TC", sans-serif;
+      background: #f5f7fb;
+      color: #2f3640;
+      margin: 0;
+      padding: 0;
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* ── 1. 版面骨架：主內容 + 側欄並排 ──────────────────────── */
+    #layoutWrapper {
+      display: flex;
+      align-items: stretch;
+      min-height: 100vh;
+    }
+
+    #mainContent {
+      flex: 1 1 auto;
+      min-width: 0;
+      padding: 24px 24px 110px;   /* 底部留白，避免內容被浮動按鈕遮住 */
+      transition: flex-basis 0.38s cubic-bezier(0.4, 0, 0.2, 1),
+                  padding    0.38s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .container {
+      max-width: 1800px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: 52px;
+      line-height: 1.2;
+      color: #243b5a;
+      font-weight: 800;
+    }
+
+    .subtitle {
+      color: #6b7280;
+      font-size: 18px;
+      margin-bottom: 28px;
+    }
+
+    /* ── 2. Chatbot 側欄 ────────────────────────────────────── */
+    #chatSidebar {
+      flex: 0 0 0px;
+      width: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+      border-left: 0 solid #dbe4f0;
+      box-shadow: none;
+      transition: flex-basis  0.38s cubic-bezier(0.4, 0, 0.2, 1),
+                  width       0.38s cubic-bezier(0.4, 0, 0.2, 1),
+                  border-left 0.38s cubic-bezier(0.4, 0, 0.2, 1),
+                  box-shadow  0.38s cubic-bezier(0.4, 0, 0.2, 1);
+      position: sticky;
+      top: 0;
+      height: 100vh;
+    }
+
+    #chatSidebar.open {
+      flex-basis: 420px;
+      width: 420px;
+      border-left: 1px solid #dbe4f0;
+      box-shadow: -4px 0 24px rgba(15, 30, 60, 0.08);
+    }
+
+    .sidebar-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 18px;
+      background: linear-gradient(135deg, #1e3a6e 0%, #2563eb 100%);
+      flex-shrink: 0;
+    }
+
+    .sidebar-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .sidebar-avatar svg { width: 20px; height: 20px; fill: #fff; }
+
+    .sidebar-info { flex: 1; min-width: 0; }
+
+    .sidebar-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #fff;
+      margin: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .sidebar-status {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.75);
+      margin: 2px 0 0;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    #usageTag {
+      display: inline-block;
+      background: rgba(255, 255, 255, 0.18);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 5px;
+      padding: 1px 7px;
+      font-size: 11px;
+      color: #fff;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    #usageTag.warn   { background: rgba(251, 191, 36, 0.30); border-color: rgba(251, 191, 36, 0.50); }
+    #usageTag.danger { background: rgba(239, 68, 68, 0.35);  border-color: rgba(239, 68, 68, 0.55); }
+
+    .sidebar-close {
+      background: rgba(255, 255, 255, 0.15);
+      border: none;
+      color: #fff;
+      border-radius: 9px;
+      width: 34px;
+      height: 34px;
+      cursor: pointer;
+      font-size: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: background 0.15s;
+    }
+
+    .sidebar-close:hover { background: rgba(255, 255, 255, 0.28); }
+
+    /* 冷卻提示列 */
+    #cooldownBar {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 16px;
+      background: #fef3c7;
+      border-bottom: 1px solid #fde68a;
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+
+    #cooldownBar svg { width: 15px; height: 15px; fill: #d97706; flex-shrink: 0; }
+    #cooldownBar span { font-size: 12px; color: #92400e; font-weight: 500; }
+
+    #cooldownProgress {
+      flex: 1;
+      height: 3px;
+      background: #fde68a;
+      border-radius: 99px;
+      overflow: hidden;
+      min-width: 40px;
+    }
+
+    #cooldownFill {
+      height: 100%;
+      background: #f59e0b;
+      border-radius: 99px;
+      transition: width 1s linear;
+      width: 100%;
+    }
+
+    /* iframe 區域 */
+    .sidebar-body {
+      flex: 1;
+      overflow: hidden;
+      background: #f5f7fb;
+      position: relative;
+    }
+
+    .sidebar-body iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: block;
+    }
+
+    /* 次數用完畫面 */
+    #exhaustedPanel {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      padding: 32px 20px;
+      text-align: center;
+      gap: 14px;
+    }
+
+    #exhaustedPanel .ex-icon {
+      width: 60px;
+      height: 60px;
+      background: #fee2e2;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #exhaustedPanel .ex-icon svg { width: 32px; height: 32px; fill: #dc2626; }
+    #exhaustedPanel h3 { font-size: 18px; color: #243b5a; margin: 0; }
+    #exhaustedPanel p  { font-size: 14px; color: #6b7280; margin: 0; line-height: 1.7; }
+
+    /* ── 3. 浮動觸發按鈕 ────────────────────────────────────── */
+    #chatFab {
+      position: fixed;
+      bottom: 32px;
+      right: 32px;
+      z-index: 900;
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #4f8ff7 0%, #2563eb 100%);
+      border: none;
+      cursor: pointer;
+      box-shadow: 0 6px 24px rgba(37, 99, 235, 0.38);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 2px;
+      transition: transform 0.2s, box-shadow 0.2s, background 0.3s,
+                  right 0.38s cubic-bezier(0.4, 0, 0.2, 1);
+      outline: none;
+    }
+
+    /* 側欄展開時按鈕跟著往左移，不被側欄蓋住 */
+    #chatFab.shifted { right: 452px; }
+
+    #chatFab:hover:not(:disabled) {
+      transform: scale(1.08);
+      box-shadow: 0 10px 32px rgba(37, 99, 235, 0.48);
+    }
+
+    #chatFab:focus-visible {
+      box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.35), 0 6px 24px rgba(37, 99, 235, 0.38);
+    }
+
+    #chatFab.cooling {
+      background: linear-gradient(135deg, #9ca3af 0%, #6b7280 100%);
+      box-shadow: 0 4px 16px rgba(107, 114, 128, 0.35);
+      cursor: not-allowed;
+      transform: none !important;
+    }
+
+    #chatFab.exhausted {
+      background: linear-gradient(135deg, #f87171 0%, #dc2626 100%);
+      box-shadow: 0 4px 16px rgba(220, 38, 38, 0.35);
+      cursor: not-allowed;
+      transform: none !important;
+    }
+
+    #chatFab svg { width: 26px; height: 26px; fill: #fff; }
+
+    #fabCooldownText {
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1;
+      display: none;
+    }
+
+    #chatFab .badge {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      width: 11px;
+      height: 11px;
+      background: #ef4444;
+      border-radius: 50%;
+      border: 2px solid #fff;
+      display: none;
+    }
+
+    /* ── 4. 頁籤 ────────────────────────────────────────────── */
+    .tab-nav {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    .tab-btn {
+      border: 1px solid #dbe4f0;
+      border-bottom: none;
+      background: #eaf0fa;
+      color: #5f6b7a;
+      border-radius: 14px 14px 0 0;
+      padding: 12px 26px;
+      font-size: 17px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .tab-btn:hover:not(.active) { background: #f1f5fb; }
+
+    .tab-btn.active {
+      background: #fff;
+      color: #243b5a;
+      box-shadow: 0 -2px 0 #4f8ff7 inset;
+    }
+
+    .tab-btn:focus-visible {
+      outline: 2px solid #4f8ff7;
+      outline-offset: 2px;
+    }
+
+    /* ── 5. NotebookLM 導引卡片 ─────────────────────────────── */
+    .notebook-card {
+      text-align: center;
+      padding: 56px 24px;
+    }
+
+    .notebook-card .icon {
+      font-size: 44px;
+      margin-bottom: 14px;
+    }
+
+    .notebook-card h3 {
+      font-size: 24px;
+      color: #243b5a;
+      margin: 0 0 12px;
+    }
+
+    .notebook-card p {
+      color: #6b7280;
+      font-size: 16px;
+      line-height: 1.8;
+      max-width: 620px;
+      margin: 0 auto 28px;
+    }
+
+    .notebook-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #4f8ff7;
+      color: #fff;
+      border: none;
+      border-radius: 14px;
+      padding: 16px 32px;
+      font-size: 17px;
+      font-weight: 700;
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .notebook-btn:hover { background: #3b78e0; }
+
+    /* 兩個 AI 入口的比較說明 */
+    .ai-compare {
+      max-width: 760px;
+      margin: 34px auto 0;
+      border-top: 1px dashed #d7e0ea;
+      padding-top: 26px;
+      text-align: left;
+    }
+
+    .ai-compare h4 {
+      font-size: 16px;
+      color: #243b5a;
+      margin: 0 0 14px;
+      text-align: center;
+    }
+
+    .ai-compare-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .ai-compare-item {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 16px 18px;
+    }
+
+    .ai-compare-item strong {
+      display: block;
+      color: #243b5a;
+      font-size: 15px;
+      margin-bottom: 6px;
+    }
+
+    .ai-compare-item span {
+      color: #6b7280;
+      font-size: 14px;
+      line-height: 1.75;
+    }
+
+    .inline-chat-btn {
+      background: none;
+      border: none;
+      padding: 0;
+      color: #2563eb;
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: underline;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .inline-chat-btn:hover { color: #1d4ed8; }
+
+    /* ── 6. 搜尋系統 ────────────────────────────────────────── */
+    .panel {
+      background: #fff;
+      border: 1px solid #dbe4f0;
+      border-radius: 22px;
+      box-shadow: 0 8px 24px rgba(25, 45, 75, 0.06);
+      padding: 26px 28px;
+      margin-bottom: 26px;
+    }
+
+    .panel h2 {
+      margin: 0 0 18px;
+      font-size: 28px;
+      color: #243b5a;
+    }
+
+    .search-grid {
+      display: grid;
+      grid-template-columns: 2.2fr 1fr 1.1fr 1.2fr;
+      gap: 16px;
+      margin-bottom: 12px;
+    }
+
+    input,
+    select {
+      width: 100%;
+      height: 58px;
+      border: 1px solid #cfd8e3;
+      border-radius: 18px;
+      font-size: 18px;
+      padding: 0 18px;
+      background: #fff;
+      color: #374151;
+      outline: none;
+      font-family: inherit;
+    }
+
+    input:focus,
+    select:focus {
+      border-color: #4f8ff7;
+      box-shadow: 0 0 0 3px rgba(79, 143, 247, 0.15);
+    }
+
+    .hint {
+      color: #7b8794;
+      font-size: 15px;
+      margin: 0;
+      line-height: 1.9;
+    }
+
+    .hint code {
+      background: #eef2f8;
+      border: 1px solid #dbe4f0;
+      border-radius: 5px;
+      padding: 1px 6px;
+      font-size: 14px;
+      color: #4b5563;
+    }
+
+    .result-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .result-meta {
+      color: #5f6b7a;
+      font-size: 18px;
+      margin-bottom: 0;
+    }
+
+    .export-btn {
+      border: 1px solid #cfd8e3;
+      background: #fff;
+      color: #374151;
+      border-radius: 10px;
+      padding: 10px 16px;
+      font-size: 14px;
+      cursor: pointer;
+      white-space: nowrap;
+      font-family: inherit;
+    }
+
+    .export-btn:hover {
+      background: #f8fafc;
+      border-color: #b8c4d3;
+    }
+
+    .table-wrap {
+      width: 100%;
+      overflow-x: auto;
+      border: 1px solid #d7e0ea;
+      border-radius: 16px;
+      background: #fff;
+    }
+
+    /* min-width 取 1200px：側欄展開後主內容變窄，
+       仍能維持欄位可讀，又不至於一開側欄就爆出過長橫向捲軸。 */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      min-width: 1200px;
+    }
+
+    thead th {
+      background: #eaf2ff;
+      color: #374151;
+      font-size: 17px;
+      text-align: left;
+      padding: 15px 13px;
+      border-right: 1px solid #d7e0ea;
+      border-bottom: 1px solid #d7e0ea;
+    }
+
+    tbody td {
+      padding: 15px 13px;
+      border-right: 1px solid #d7e0ea;
+      border-bottom: 1px solid #d7e0ea;
+      vertical-align: top;
+      font-size: 16px;
+      color: #374151;
+      word-break: break-word;
+      background: #fff;
+    }
+
+    thead th:last-child,
+    tbody td:last-child { border-right: none; }
+
+    tbody tr:hover td { background: #fbfdff; }
+
+    /* 側欄展開時主內容變窄（1440 視窗約剩 1020px），
+       表格改用緊湊尺寸，避免一開助理就出現長距離橫向捲動。
+       用 JS 切 .chat-open 類別而非 :has()，以相容較舊的瀏覽器。 */
+    #layoutWrapper.chat-open table { min-width: 1040px; }
+    #layoutWrapper.chat-open thead th { font-size: 16px; padding: 13px 11px; }
+    #layoutWrapper.chat-open tbody td { font-size: 15px; padding: 13px 11px; }
+    #layoutWrapper.chat-open th.col-pdf,
+    #layoutWrapper.chat-open td.col-pdf { width: 104px; min-width: 104px; }
+    #layoutWrapper.chat-open .pdf-btn { min-width: 76px; height: 36px; font-size: 13px; padding: 0 11px; }
+    #layoutWrapper.chat-open h1 { font-size: 42px; }
+
+    .col-year    { width: 6%; }
+    .col-meeting { width: 16%; }
+    .col-unit    { width: 11%; }
+    .col-title   { width: 22%; }
+    .col-content { width: 16%; }
+    .col-result  { width: 16%; }
+
+    .col-page {
+      width: 6%;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .page-tag {
+      display: inline-block;
+      background: #eef4ff;
+      color: #3b6cbf;
+      border: 1px solid #c8d9f5;
+      border-radius: 8px;
+      font-size: 13px;
+      padding: 2px 8px;
+      white-space: nowrap;
+    }
+
+    th.col-pdf,
+    td.col-pdf {
+      width: 116px;
+      min-width: 116px;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    mark {
+      background: #fff3a3;
+      color: inherit;
+      border-radius: 2px;
+      padding: 0 1px;
+    }
+
+    .summary-link {
+      color: #4d79b3;
+      text-decoration: underline;
+      cursor: pointer;
+      line-height: 1.8;
+    }
+
+    .summary-link:hover { color: #275ea3; }
+
+    .pdf-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 84px;
+      height: 39px;
+      padding: 0 13px;
+      border: 1px solid #d7dfe8;
+      border-radius: 999px;
+      background: #fff;
+      color: #4b5563;
+      text-decoration: none;
+      font-size: 14px;
+      white-space: nowrap;
+    }
+
+    .pdf-btn:hover {
+      background: #f8fafc;
+      border-color: #b8c4d3;
+    }
+
+    .pagination {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 18px;
+    }
+
+    .page-btn {
+      min-width: 42px;
+      height: 42px;
+      border: 1px solid #cfd8e3;
+      background: #fff;
+      color: #374151;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 15px;
+      font-family: inherit;
+    }
+
+    .page-btn.active {
+      background: #4f8ff7;
+      color: #fff;
+      border-color: #4f8ff7;
+    }
+
+    .empty {
+      padding: 24px 8px 6px;
+      color: #6b7280;
+      font-size: 16px;
+    }
+
+    /* 內容展開彈窗：z-index 高於側欄(800)與浮動按鈕(900)，確保恆在最上層 */
+    .modal-mask {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1300;
+      padding: 24px;
+    }
+
+    .modal {
+      width: min(920px, 100%);
+      max-height: 85vh;
+      overflow: auto;
+      background: #fff;
+      border-radius: 18px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+      padding: 24px;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .modal-title {
+      font-size: 24px;
+      font-weight: 700;
+      color: #243b5a;
+    }
+
+    .close-btn {
+      border: none;
+      background: #eef2f7;
+      color: #374151;
+      border-radius: 10px;
+      padding: 10px 14px;
+      cursor: pointer;
+      font-size: 14px;
+      font-family: inherit;
+    }
+
+    .modal-content {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 16px;
+      color: #374151;
+      line-height: 1.9;
+    }
+
+    /* 搜尋框下方的語法提示：改為分行條列，避免長句難掃讀 */
+    .hint-list {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .hint-list li {
+      color: #6b7280;
+      font-size: 15px;
+      line-height: 1.75;
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .hint-list li > code.syn { flex-shrink: 0; }
+
+    .hint-warn {
+      color: #b45309;
+      font-weight: 700;
+    }
+
+    .hint-more {
+      margin-top: 4px;
+      padding-top: 10px;
+      border-top: 1px dashed #dbe4f0;
+    }
+
+    .link-btn {
+      background: none;
+      border: none;
+      padding: 0;
+      color: #2563eb;
+      font-size: 15px;
+      font-weight: 600;
+      font-family: inherit;
+      text-decoration: underline;
+      cursor: pointer;
+    }
+
+    .link-btn:hover { color: #1d4ed8; }
+
+    /* ── 6.5 使用說明頁 ─────────────────────────────────────── */
+    .guide-intro {
+      color: #6b7280;
+      font-size: 16px;
+      line-height: 1.85;
+      margin: 0 0 26px;
+    }
+
+    .guide-sec { margin-bottom: 34px; }
+    .guide-sec:last-child { margin-bottom: 0; }
+
+    .guide-sec > h3 {
+      font-size: 20px;
+      color: #243b5a;
+      margin: 0 0 6px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      flex-wrap: wrap;
+    }
+
+    .guide-sec > h3 .num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      height: 26px;
+      border-radius: 8px;
+      background: #4f8ff7;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .guide-sec > p {
+      color: #6b7280;
+      font-size: 15px;
+      line-height: 1.85;
+      margin: 0 0 14px;
+    }
+
+    /* 說明頁專用表格：不套用搜尋結果表的固定寬度與 1200px 下限 */
+    .guide-table {
+      width: 100%;
+      min-width: 0;
+      table-layout: auto;
+      border-collapse: collapse;
+      border: 1px solid #d7e0ea;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .guide-table th,
+    .guide-table td {
+      font-size: 15px;
+      padding: 12px 14px;
+      border-bottom: 1px solid #e2e8f0;
+      border-right: 1px solid #e2e8f0;
+      vertical-align: middle;
+      text-align: left;
+      background: #fff;
+      word-break: break-word;
+    }
+
+    .guide-table th {
+      background: #eaf2ff;
+      color: #374151;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .guide-table tr:last-child td { border-bottom: none; }
+    .guide-table th:last-child,
+    .guide-table td:last-child { border-right: none; }
+
+    .guide-table td.num-cell {
+      white-space: nowrap;
+      font-weight: 700;
+      color: #243b5a;
+    }
+
+    /* 語法標記 */
+    code.syn {
+      background: #eef2f8;
+      border: 1px solid #dbe4f0;
+      border-radius: 6px;
+      padding: 2px 8px;
+      font-size: 14px;
+      color: #1f3a5f;
+      white-space: nowrap;
+    }
+
+    code.syn.bad { background: #fef2f2; border-color: #fecaca; color: #b91c1c; }
+    code.syn.ok  { background: #f0fdf4; border-color: #bbf7d0; color: #15803d; }
+
+    /* 可點擊試查的範例按鈕 */
+    .demo-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #fff;
+      border: 1px solid #b9cdf0;
+      color: #2563eb;
+      border-radius: 999px;
+      padding: 6px 14px;
+      font-size: 14px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .demo-btn:hover { background: #eff5ff; border-color: #4f8ff7; }
+    .demo-btn:focus-visible { outline: 2px solid #4f8ff7; outline-offset: 2px; }
+    .demo-btn::after { content: "→"; font-weight: 700; }
+
+    /* 提醒方塊 */
+    .note-box {
+      border-radius: 14px;
+      padding: 16px 18px;
+      font-size: 15px;
+      line-height: 1.85;
+      margin: 0 0 14px;
+    }
+
+    .note-box.warn   { background: #fffbeb; border: 1px solid #fde68a; color: #78500f; }
+    .note-box.danger { background: #fef2f2; border: 1px solid #fecaca; color: #9f1239; }
+    .note-box.info   { background: #f0f7ff; border: 1px solid #cfe0f7; color: #1e3a6e; }
+    .note-box strong { color: inherit; }
+
+    .quote-sample {
+      background: #f8fafc;
+      border-left: 3px solid #b9cdf0;
+      border-radius: 0 10px 10px 0;
+      padding: 12px 16px;
+      margin: 12px 0;
+      font-size: 15px;
+      color: #4b5563;
+      line-height: 1.85;
+    }
+
+    .quote-sample em {
+      font-style: normal;
+      background: #fff3a3;
+      border-radius: 3px;
+      padding: 0 3px;
+      font-weight: 700;
+      color: #1f2937;
+    }
+
+    .guide-scroll { width: 100%; overflow-x: auto; }
+
+    /* ── 7. RWD ─────────────────────────────────────────────── */
+    @media (max-width: 1100px) {
+      .search-grid { grid-template-columns: 1fr 1fr; }
+      .ai-compare-grid { grid-template-columns: 1fr; }
+      #chatSidebar.open { flex-basis: 360px; width: 360px; }
+      #chatFab.shifted  { right: 392px; }
+    }
+
+    @media (max-width: 768px) {
+      #mainContent { padding: 14px 14px 96px; }
+      h1 { font-size: 34px; }
+      .subtitle { font-size: 16px; }
+      .panel { padding: 18px; border-radius: 18px; }
+      .panel h2 { font-size: 22px; }
+      .search-grid { grid-template-columns: 1fr; }
+      input, select { height: 52px; font-size: 16px; }
+      table { min-width: 1050px; }
+      th.col-pdf, td.col-pdf { width: 104px; min-width: 104px; }
+      .pdf-btn { min-width: 74px; height: 38px; font-size: 13px; padding: 0 10px; }
+      .tab-btn { padding: 10px 18px; font-size: 15px; }
+      .notebook-card { padding: 36px 16px; }
+      .guide-sec > h3 { font-size: 18px; }
+      .guide-table th, .guide-table td { font-size: 14px; padding: 10px 11px; }
+      .guide-table { min-width: 520px; }
+
+      /* 手機版：側欄改為從底部展開，蓋在主內容上方 */
+      #chatSidebar {
+        position: fixed;
+        top: auto;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 0;
+        width: 100% !important;
+        flex-basis: auto !important;
+        border-left: none !important;
+        border-top: 1px solid #dbe4f0;
+        box-shadow: 0 -4px 24px rgba(15, 30, 60, 0.12);
+        z-index: 800;
+        transition: height 0.38s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+
+      #chatSidebar.open { height: 70vh; }
+
+      #chatFab { bottom: 20px; right: 20px; width: 54px; height: 54px; }
+
+      /* 手機版側欄從底部展開 70vh，若照桌機做法把浮動按鈕往上推，
+         它會落在標題區並蓋住文字。側欄標題列本身已有關閉鈕（且 Esc 也可關閉），
+         此時浮動按鈕是多餘的，直接隱藏以免遮擋內容。 */
+      #chatFab.shifted { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══ 並排外層容器 ═══ -->
+<div id="layoutWrapper">
+
+  <!-- ① 主內容區 -->
+  <div id="mainContent">
+    <div class="container">
+      <h1>教務會議資料庫搜尋系統v3.0</h1>
+      <p class="subtitle">可依關鍵字、年度與類型查詢教務會議議題內容與決議摘要，並下載會議紀錄 PDF；亦可透過 NotebookLM 或右下角 AI 助理進行自然語言問答。</p>
+
+      <!-- 頁籤：資料搜尋／AI 問答 -->
+      <div class="tab-nav" role="tablist" aria-label="頁面切換">
+        <button type="button" class="tab-btn active" id="tabSearchBtn"
+                role="tab" aria-selected="true" aria-controls="searchView">資料搜尋</button>
+        <button type="button" class="tab-btn" id="tabNotebookBtn"
+                role="tab" aria-selected="false" aria-controls="notebookView">AI 問答（NotebookLM）</button>
+        <button type="button" class="tab-btn" id="tabGuideBtn"
+                role="tab" aria-selected="false" aria-controls="guideView">使用說明</button>
+      </div>
+
+      <!-- ── 頁籤一：資料搜尋 ── -->
+      <div id="searchView" role="tabpanel" aria-labelledby="tabSearchBtn">
+        <section class="panel">
+          <h2>條件搜尋</h2>
+          <div class="search-grid">
+            <input id="searchInput" type="text" placeholder="請輸入關鍵字" autocomplete="off" />
+            <select id="yearFilter" aria-label="年度篩選">
+              <option value="">全部年度</option>
+            </select>
+            <select id="typeFilter" aria-label="類型篩選">
+              <option value="">全部類型</option>
+              <option value="新增">新增</option>
+              <option value="修訂">修訂</option>
+              <option value="申請">申請</option>
+              <option value="報告">報告</option>
+              <option value="其他">其他</option>
+            </select>
+            <select id="sortMode" aria-label="排序方式">
+              <option value="relevance">依相關度排序</option>
+              <option value="chrono">依年度時序排序</option>
+            </select>
+          </div>
+          <ul class="hint-list">
+            <li><code class="syn">學分 抵免</code><span><strong>空白分隔</strong>＝兩個詞都要出現（缺一不可）</span></li>
+            <li><code class="syn">"外語畢業標準"</code><span><strong>加引號</strong>＝必須是連在一起的完整詞組</span></li>
+            <li><code class="syn">通識 -遠距</code><span><strong>加減號</strong>＝排除。<span class="hint-warn">減號要緊貼關鍵字，中間不可有空白</span>（打成 <code class="syn bad">通識 - 遠距</code> 意思會完全相反）</span></li>
+            <li class="hint-more">
+              <span>點擊「內容摘要」或「決議摘要」可展開完整文字。</span>
+              <button type="button" class="link-btn" id="openGuideFromHint">查看完整使用說明</button>
+            </li>
+          </ul>
+        </section>
+
+        <section class="panel">
+          <h2>搜尋結果</h2>
+          <div class="result-toolbar">
+            <div id="resultCount" class="result-meta">共 0 筆結果</div>
+            <button id="exportCsvBtn" type="button" class="export-btn">匯出目前結果為 CSV</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th class="col-year">年度</th>
+                  <th class="col-meeting">會議</th>
+                  <th class="col-unit">單位</th>
+                  <th class="col-title">案由</th>
+                  <th class="col-content">內容摘要</th>
+                  <th class="col-result">決議摘要</th>
+                  <th class="col-page">頁數</th>
+                  <th class="col-pdf">PDF</th>
+                </tr>
+              </thead>
+              <tbody id="resultsBody">
+                <tr>
+                  <td colspan="8" class="empty">請輸入關鍵字或設定篩選條件後開始搜尋。</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div id="pagination" class="pagination"></div>
+        </section>
+      </div>
+
+      <!-- ── 頁籤二：AI 問答（NotebookLM 導引）── -->
+      <div id="notebookView" role="tabpanel" aria-labelledby="tabNotebookBtn" hidden>
+        <section class="panel notebook-card">
+          <div class="icon" aria-hidden="true">💬</div>
+          <h3>AI 問答（NotebookLM）</h3>
+          <p>
+            此問答功能由 Google NotebookLM 提供，來源為 92 至 114 學年度共 98 份教務會議紀錄 PDF，
+            回答會附上出處，適合跨年度政策沿革的整理與彙整。
+            Google 基於安全考量不允許外部網站嵌入其頁面，因此點擊下方按鈕會在新視窗開啟，
+            且需要用你的 Google 帳號登入才能檢視。
+          </p>
+          <a class="notebook-btn"
+             href="https://notebook.google.com/notebook/73395679-7541-4476-a343-ac3810ed6766/preview"
+             target="_blank" rel="noopener noreferrer">
+            在新視窗開啟 AI 問答 ↗
+          </a>
+
+          <!-- 兩個 AI 入口的定位說明，避免使用者混淆該用哪一個 -->
+          <div class="ai-compare">
+            <h4>本系統提供兩種 AI 問答入口，用途不同</h4>
+            <div class="ai-compare-grid">
+              <div class="ai-compare-item">
+                <strong>NotebookLM（本頁籤）</strong>
+                <span>
+                  直接以 98 份原始 PDF 為來源，適合「跨年度整理」「政策沿革」等需要長篇彙整並列出出處的問題。
+                  需在新視窗開啟並登入 Google 帳號。
+                </span>
+              </div>
+              <div class="ai-compare-item">
+                <strong>MeetMind AI 助理（右下角）</strong>
+                <span>
+                  以側欄形式開啟，可一邊看搜尋結果一邊詢問，適合即時、簡短的查詢。
+                  <button type="button" class="inline-chat-btn" id="openChatFromNotebook">立即開啟 AI 助理 →</button>
+                </span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- ── 頁籤三：使用說明 ── -->
+      <div id="guideView" role="tabpanel" aria-labelledby="tabGuideBtn" hidden>
+        <section class="panel">
+          <h2>查詢語法與使用說明</h2>
+          <p class="guide-intro">
+            本系統收錄 92 至 114 學年度共 <strong>983 筆</strong>教務會議提案（98 份會議紀錄 PDF）。
+            以下每個範例都可以直接點擊試查，括號內的筆數是實際查詢結果。
+          </p>
+
+          <div class="guide-sec">
+            <h3><span class="num">1</span>三種查詢語法</h3>
+            <div class="guide-scroll">
+              <table class="guide-table">
+                <thead>
+                  <tr><th>語法</th><th>意思</th><th>點擊試查</th><th>結果</th></tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code class="syn">空白</code> 分隔</td>
+                    <td>多個關鍵字<strong>全部都要出現</strong>，缺一不可</td>
+                    <td><button type="button" class="demo-btn" data-demo-query="學分 抵免">學分 抵免</button></td>
+                    <td class="num-cell">45 筆</td>
+                  </tr>
+                  <tr>
+                    <td><code class="syn">"引號"</code></td>
+                    <td>必須是<strong>連在一起</strong>的完整詞組</td>
+                    <td><button type="button" class="demo-btn" data-demo-query="&quot;外語畢業標準&quot;">"外語畢業標準"</button></td>
+                    <td class="num-cell">20 筆</td>
+                  </tr>
+                  <tr>
+                    <td><code class="syn">-減號</code></td>
+                    <td><strong>排除</strong>含有這個詞的紀錄</td>
+                    <td><button type="button" class="demo-btn" data-demo-query="通識 -遠距">通識 -遠距</button></td>
+                    <td class="num-cell">151 筆</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="note-box info" style="margin-top:14px">
+              <strong>引號差在哪？</strong>
+              查 <code class="syn">外語 畢業 標準</code> 會找到 <strong>23 筆</strong>——這三個詞散落在紀錄各處也算命中；
+              加了引號查 <code class="syn">"外語畢業標準"</code> 只剩 <strong>20 筆</strong>，因為必須六個字連在一起。
+              <button type="button" class="demo-btn" data-demo-query="外語 畢業 標準" style="margin-left:6px">試查不加引號</button>
+            </div>
+          </div>
+
+          <div class="guide-sec">
+            <h3><span class="num">2</span>最常犯的錯誤：減號後面不可以有空白</h3>
+            <div class="note-box danger">
+              減號和關鍵字之間只要多一個空白，意思會<strong>完全顛倒</strong>——
+              從「排除這個詞」變成「這個詞也要有」。這是目前最常見的誤用。
+            </div>
+            <div class="guide-scroll">
+              <table class="guide-table">
+                <thead>
+                  <tr><th>你打的</th><th>系統實際理解</th><th>結果</th></tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code class="syn ok">通識 -遠距</code>　正確</td>
+                    <td>要有「通識」，<strong>排除</strong>「遠距」</td>
+                    <td class="num-cell">151 筆</td>
+                  </tr>
+                  <tr>
+                    <td><code class="syn bad">通識 - 遠距</code>　錯誤</td>
+                    <td>要有「通識」<strong>而且</strong>要有「遠距」</td>
+                    <td class="num-cell">21 筆</td>
+                  </tr>
+                  <tr>
+                    <td><code class="syn ok">通識 －遠距</code>　可用</td>
+                    <td>中文輸入法的全形減號會自動轉換</td>
+                    <td class="num-cell">151 筆</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="guide-sec">
+            <h3><span class="num">3</span>排除詞比對的是「整筆紀錄」，不只是案由</h3>
+            <p>
+              這是最容易誤解的地方。減號的意思<strong>不是</strong>「案由不要有這個詞」，
+              而是「這筆紀錄的<strong>任何欄位</strong>都不准出現這個詞」——包含案由、說明、決議、提案單位、會議名稱，甚至 PDF 檔名。
+            </p>
+            <p>
+              舉例：查 <code class="syn">通識 -遠距</code> 時，下面這筆被剔除了，但它的案由裡根本沒有「遠距」兩個字：
+            </p>
+            <div class="quote-sample">
+              <strong>案由：</strong>【提案七】本校 102 學年度第 2 學期第 1 次（臨時）通識教育中心全體委員會議決議…<br>
+              <strong>說明：</strong>…含 103 學年度第 1 學期新開通識課程、<em>遠距</em>教學通識課、暑期外語學分採計為通…
+            </div>
+            <p style="margin-bottom:0">
+              它是因為<strong>說明欄</strong>順帶提到「遠距」而被排除的。這通常不是你要的結果——解法見第 5 點。
+            </p>
+          </div>
+
+          <div class="guide-sec">
+            <h3><span class="num">4</span>教務處實務範例</h3>
+            <div class="guide-scroll">
+              <table class="guide-table">
+                <thead>
+                  <tr><th>想查什麼</th><th>只打關鍵字</th><th>加上排除詞</th><th>剔除</th></tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>學分學程，但不要微學程</td>
+                    <td><button type="button" class="demo-btn" data-demo-query="學分學程">學分學程</button> 94 筆</td>
+                    <td><button type="button" class="demo-btn" data-demo-query="學分學程 -微學程">學分學程 -微學程</button> 93 筆</td>
+                    <td class="num-cell">1</td>
+                  </tr>
+                  <tr>
+                    <td>轉系，排除轉學相關</td>
+                    <td><button type="button" class="demo-btn" data-demo-query="轉系">轉系</button> 29 筆</td>
+                    <td><button type="button" class="demo-btn" data-demo-query="轉系 -轉學">轉系 -轉學</button> 22 筆</td>
+                    <td class="num-cell">7</td>
+                  </tr>
+                  <tr>
+                    <td>招生案，排除僑生專案</td>
+                    <td><button type="button" class="demo-btn" data-demo-query="招生">招生</button> 41 筆</td>
+                    <td><button type="button" class="demo-btn" data-demo-query="招生 -僑生">招生 -僑生</button> 39 筆</td>
+                    <td class="num-cell">2</td>
+                  </tr>
+                  <tr>
+                    <td>分辨「英文」與「英語」用字</td>
+                    <td><button type="button" class="demo-btn" data-demo-query="英文">英文</button> 110 筆</td>
+                    <td><button type="button" class="demo-btn" data-demo-query="英文 -英語">英文 -英語</button> 83 筆</td>
+                    <td class="num-cell">27</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="note-box info" style="margin-top:14px">
+              排除詞可以<strong>疊加多個</strong>，例如 <code class="syn">抵免 -役男 -僑生</code>，會把兩種都排掉。
+            </div>
+          </div>
+
+          <div class="guide-sec">
+            <h3><span class="num">5</span>排除範圍太大時：把排除詞加上引號</h3>
+            <p>
+              像「遠距」這種兩個字的排除詞殺傷力很大，會連「說明欄順帶提一句」的案子一起砍掉。
+              改成完整詞組就精準多了：
+            </p>
+            <div class="guide-scroll">
+              <table class="guide-table">
+                <thead>
+                  <tr><th>查詢</th><th>結果</th><th>說明</th></tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><button type="button" class="demo-btn" data-demo-query="通識">通識</button></td>
+                    <td class="num-cell">172 筆</td>
+                    <td>基準：全部通識相關</td>
+                  </tr>
+                  <tr>
+                    <td><button type="button" class="demo-btn" data-demo-query="通識 -遠距">通識 -遠距</button></td>
+                    <td class="num-cell">151 筆</td>
+                    <td>砍太多，誤殺只是順帶提及的案子</td>
+                  </tr>
+                  <tr>
+                    <td><button type="button" class="demo-btn" data-demo-query="通識 -&quot;遠距教學課程開課&quot;">通識 -"遠距教學課程開課"</button></td>
+                    <td class="num-cell">153 筆</td>
+                    <td>只砍真正的遠距開課案</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="guide-sec">
+            <h3><span class="num">6</span>不要用數字當排除詞</h3>
+            <div class="note-box warn">
+              因為排除詞會比對檔名和會議名稱，用數字排除會誤殺大量無關紀錄。
+              要限定學年度，請改用上方的<strong>「年度」下拉選單</strong>。
+            </div>
+            <p>
+              例如查 <code class="syn">抵免</code> 有 51 筆，但打成 <code class="syn bad">抵免 -100</code> 只剩 45 筆，
+              被誤殺的 6 筆裡包含 <code class="syn">99-4.pdf</code>、<code class="syn">101-3.pdf</code>、<code class="syn">106-2.pdf</code>——
+              它們跟 100 學年度毫無關係，只是說明內文剛好出現數字 100（例如「100 人」「100 學分」）。
+            </p>
+            <p style="margin-bottom:0">
+              另外，<strong>只打排除詞、不打正向關鍵字</strong>（例如單獨輸入 <code class="syn">-遠距</code>）會回傳 923 筆，
+              等於「983 筆裡不含遠距的全部」，實務上沒有意義。
+            </p>
+          </div>
+
+          <div class="guide-sec">
+            <h3><span class="num">7</span>其他功能速查</h3>
+            <div class="guide-scroll">
+              <table class="guide-table">
+                <thead>
+                  <tr><th>功能</th><th>怎麼用</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>年度／類型篩選</td><td>與關鍵字是「而且」的關係，兩者同時成立才顯示。類型分為新增、修訂、申請、報告、其他，一筆提案可同時屬於多種類型。</td></tr>
+                  <tr><td>排序</td><td>「依相關度」會把案由命中的排前面（案由權重最高，其次是內容、決議）；「依年度時序」則依年度→學期→次別→提案號排列。沒有輸入關鍵字時一律用時序。</td></tr>
+                  <tr><td>看完整內容</td><td>點擊表格中的「內容摘要」或「決議摘要」會展開完整文字，按 Esc 或點空白處關閉。</td></tr>
+                  <tr><td>回到原始文件</td><td>「頁數」欄顯示該提案在 PDF 中的起始頁碼，點右側「開啟檔案」開啟原始會議紀錄後，自行翻到該頁核對。</td></tr>
+                  <tr><td>分享查詢結果</td><td>查詢條件會即時寫進網址列，直接複製網址給同仁，對方打開就是同一組查詢結果。</td></tr>
+                  <tr><td>匯出 CSV</td><td>「匯出目前結果為 CSV」會匯出<strong>篩選後的全部結果</strong>（不是只有當前這一頁），可用 Excel 直接開啟。</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="guide-sec">
+            <h3><span class="num">8</span>兩個 AI 問答入口的差別</h3>
+            <div class="guide-scroll">
+              <table class="guide-table">
+                <thead>
+                  <tr><th>入口</th><th>適合的問題</th><th>使用方式</th></tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>NotebookLM</strong><br>（上方「AI 問答」頁籤）</td>
+                    <td>跨年度整理、政策沿革這類需要長篇彙整並列出出處的問題</td>
+                    <td>在新視窗開啟，需登入 Google 帳號</td>
+                  </tr>
+                  <tr>
+                    <td><strong>MeetMind AI 助理</strong><br>（右下角圓形按鈕）</td>
+                    <td>即時、簡短的查詢，可一邊看搜尋結果一邊問</td>
+                    <td>側欄開啟，每人 30 次開啟機會，單次可連續發問 10 分鐘</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="note-box warn" style="margin-top:14px">
+              <strong>重要：</strong>AI 回答僅供快速理解與定位之用。
+              正式引用或作為行政依據前，請務必回到原始會議紀錄 PDF 確認。
+            </div>
+          </div>
+
+        </section>
+      </div>
+
+    </div>
+  </div><!-- /#mainContent -->
+
+  <!-- ② Chatbot 側欄 -->
+  <div id="chatSidebar" role="complementary" aria-label="MeetMind AI 助理">
+
+    <div class="sidebar-header">
+      <div class="sidebar-avatar" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>
+      </div>
+      <div class="sidebar-info">
+        <p class="sidebar-title">MeetMind AI 助理</p>
+        <div class="sidebar-status">
+          <span>● 線上服務中</span>
+          <span id="usageTag">剩餘 30 次開啟機會</span>
+        </div>
+      </div>
+      <button class="sidebar-close" id="sidebarClose" type="button" aria-label="關閉助理">✕</button>
+    </div>
+
+    <!-- 冷卻倒數列 -->
+    <div id="cooldownBar">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67V7z"/></svg>
+      <span id="cooldownText">冷卻中，請稍候 20 秒</span>
+      <div id="cooldownProgress"><div id="cooldownFill"></div></div>
+    </div>
+
+    <div class="sidebar-body">
+      <!--
+        安全性註記：sandbox 屬性限制此 iframe 只保留 webchat 運作實際需要的權限
+        （執行腳本、維持自己的儲存狀態以保留對話紀錄、送出表單、開啟登入用的彈出視窗）。
+        刻意「不」授權的權限：allow-top-navigation（不能整頁跳轉、劫持使用者離開本站）、
+        allow-modals（不能跳出原生 alert/confirm 對話框）、allow-downloads（不能觸發檔案下載）。
+        referrerpolicy 避免把本頁網址透露給對方網域。
+        但這些都無法阻止有心人直接檢視原始碼取得下方網址並在別處呼叫它——
+        真正的存取控制（僅限校內網域、需要登入等）必須在 Copilot Studio／
+        Power Platform 後台設定，不是前端程式碼能解決的範圍。
+      -->
+      <iframe
+        id="chatFrame"
+        src=""
+        data-src="https://copilotstudio.microsoft.com/environments/Default-35157425-5c3c-4672-aaa4-68fb6a8c9612/bots/cr316_MEETMINDCHATBOT/webchat?__version__=2"
+        allow="microphone"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+        referrerpolicy="no-referrer"
+        title="MeetMind AI 助理">
+      </iframe>
+
+      <div id="exhaustedPanel">
+        <div class="ex-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+        </div>
+        <h3>使用次數已達上限</h3>
+        <p>每位使用者提供 30 次免費開啟機會<br>（每次開啟可於 10 分鐘內詢問多個問題）<br>如需繼續使用，請洽教務處承辦人員<br>分機 <strong>62441</strong></p>
+      </div>
+    </div>
+
+  </div><!-- /#chatSidebar -->
+
+</div><!-- /#layoutWrapper -->
+
+<!-- 內容展開彈窗 -->
+<div id="modalMask" class="modal-mask">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div id="modalTitle" class="modal-title">完整內容</div>
+      <button id="closeModalBtn" class="close-btn" type="button">關閉</button>
+    </div>
+    <div id="modalContent" class="modal-content"></div>
+  </div>
+</div>
+
+<!-- 浮動觸發按鈕 -->
+<button id="chatFab" type="button" title="開啟 MeetMind AI 助理" aria-label="開啟 AI 助理" aria-expanded="false">
+  <svg id="iconChat" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 2H4C2.9 2 2 2.9 2 4v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 12H6l-2 2V4h16v10z"/></svg>
+  <svg id="iconClose" viewBox="0 0 24 24" style="display:none" aria-hidden="true"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+  <span id="fabCooldownText"></span>
+  <span class="badge" id="chatBadge"></span>
+</button>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+// 區塊 A：Chatbot 側欄控制（含使用次數 & 冷卻機制）
+// 對外只暴露 window.MeetMindChat = { open, close, toggle, isOpen }
+// 供頁籤內的「立即開啟 AI 助理」按鈕與全域 Esc 鍵處理呼叫。
+// ══════════════════════════════════════════════════════════════
+const MeetMindChat = (function () {
+  /* ── 設定值 ──
+     重要限制（誠實聲明）：這整組次數/冷卻機制都只在瀏覽器端執行，
+     使用者清除瀏覽資料、換瀏覽器或開無痕視窗即可繞過。
+     下面的雙重儲存與逾時自動關閉只能提高「隨手繞過」的門檻，
+     無法達到真正的用量／成本控管。若 Copilot Studio 依訊息數計費，
+     唯一可靠的做法是在伺服器端（Power Automate、Azure Function，
+     或 Copilot Studio 自身的頻道訊息上限設定）驗證，而非仰賴前端數字。 */
+  const MAX_USAGE           = 30;
+  const COOLDOWN_SEC        = 20;
+  const SESSION_MAX_MINUTES = 10;  // 單次開啟超過此時間自動關閉，縮小「開一次問無限題」的可乘之機
+  const STORAGE_KEY         = "meetmind_usage_v1";
+
+  /* ── DOM ── */
+  const fab            = document.getElementById("chatFab");
+  const sidebar        = document.getElementById("chatSidebar");
+  const layoutWrapper  = document.getElementById("layoutWrapper");
+  const iconChat       = document.getElementById("iconChat");
+  const iconClose      = document.getElementById("iconClose");
+  const badge          = document.getElementById("chatBadge");
+  const frame          = document.getElementById("chatFrame");
+  const usageTag       = document.getElementById("usageTag");
+  const cooldownBar    = document.getElementById("cooldownBar");
+  const cooldownText   = document.getElementById("cooldownText");
+  const cooldownFill   = document.getElementById("cooldownFill");
+  const exhaustedPanel = document.getElementById("exhaustedPanel");
+  const fabCoolText    = document.getElementById("fabCooldownText");
+  const sidebarClose   = document.getElementById("sidebarClose");
+
+  /* ── 狀態 ── */
+  let isOpen       = false;
+  let loaded       = false;
+  let coolTimer    = null;
+  let coolRemain   = 0;
+  let sessionTimer = null;
+
+  /* ── Cookie 輔助（與 localStorage 雙寫，取兩者較小值）──
+     清除其中一種儲存方式時，另一種仍保留較低的剩餘次數，
+     不會讓次數「回滿」。（無痕視窗仍會完全繞過，見上方聲明。） */
+  function setCookie(name, value, days) {
+    try {
+      const expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toUTCString();
+      document.cookie = `${name}=${encodeURIComponent(value)};expires=${expires};path=/;SameSite=Lax`;
+    } catch {}
+  }
+
+  function getCookie(name) {
+    try {
+      const m = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
+      return m ? decodeURIComponent(m[1]) : null;
+    } catch { return null; }
+  }
+
+  function loadUsage() {
+    let ls = MAX_USAGE, ck = MAX_USAGE;
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const d = JSON.parse(raw);
+        if (typeof d.remaining === "number") ls = d.remaining;
+      }
+    } catch {}
+    const ckRaw = getCookie(STORAGE_KEY);
+    if (ckRaw !== null) {
+      const n = Number(ckRaw);
+      if (!Number.isNaN(n)) ck = n;
+    }
+    return Math.min(ls, ck);
+  }
+
+  function saveUsage(n) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ remaining: n })); } catch {}
+    setCookie(STORAGE_KEY, String(n), 365);
+  }
+
+  let remaining = loadUsage();
+
+  /* ── 更新次數標籤 ──
+     文案用「次開啟機會」而非模糊的「次」：
+     單位是「開啟側欄的次數」，同一次開啟內可詢問多個問題，
+     不是逐訊息計費，避免使用者或管理端誤解為訊息配額。 */
+  function updateUsageTag() {
+    usageTag.textContent = `剩餘 ${remaining} 次開啟機會`;
+    usageTag.className   = "";
+    if (remaining <= 5)       usageTag.classList.add("danger");
+    else if (remaining <= 10) usageTag.classList.add("warn");
+  }
+
+  /* ── 次數用完畫面 ── */
+  function showExhausted() {
+    frame.style.display          = "none";
+    exhaustedPanel.style.display = "flex";
+    fab.classList.add("exhausted");
+    fab.title = "使用次數已達上限";
+    iconChat.style.display  = "block";
+    iconClose.style.display = "none";
+  }
+
+  /* ── 冷卻倒數 ── */
+  function startCooldown(sec) {
+    fab.classList.add("cooling");
+    fab.disabled = true;
+    iconChat.style.display    = "none";
+    iconClose.style.display   = "none";
+    fabCoolText.style.display = "block";
+
+    coolRemain = sec;
+    fabCoolText.textContent   = `${coolRemain}s`;
+    cooldownBar.style.display = "flex";
+    cooldownFill.style.width  = "100%";
+    cooldownText.textContent  = `冷卻中，請稍候 ${coolRemain} 秒`;
+
+    clearInterval(coolTimer);
+    coolTimer = setInterval(() => {
+      coolRemain--;
+      fabCoolText.textContent  = `${coolRemain}s`;
+      cooldownText.textContent = `冷卻中，請稍候 ${coolRemain} 秒`;
+      cooldownFill.style.width = `${(coolRemain / COOLDOWN_SEC) * 100}%`;
+      if (coolRemain <= 0) { clearInterval(coolTimer); endCooldown(); }
+    }, 1000);
+  }
+
+  function endCooldown() {
+    fab.classList.remove("cooling");
+    fab.disabled = false;
+    fabCoolText.style.display = "none";
+    fabCoolText.textContent   = "";
+    cooldownBar.style.display = "none";
+    iconChat.style.display    = "block";
+    iconClose.style.display   = "none";
+  }
+
+  /* ── 開啟側欄 ── */
+  function openSidebar() {
+    if (remaining <= 0) { showExhausted(); return; }
+    if (fab.disabled && fab.classList.contains("cooling")) return;
+    if (isOpen) return;
+
+    remaining--;
+    saveUsage(remaining);
+    updateUsageTag();
+
+    // 延遲載入：第一次開啟時才真正連線 Copilot Studio，
+    // 避免每個造訪者一進站就對外發出請求。
+    if (!loaded) { frame.src = frame.dataset.src; loaded = true; }
+
+    isOpen = true;
+    sidebar.classList.add("open");
+    layoutWrapper.classList.add("chat-open");   // 觸發表格緊湊版面
+    fab.classList.add("shifted");
+    iconChat.style.display  = "none";
+    iconClose.style.display = "block";
+    badge.style.display     = "none";
+    fab.setAttribute("aria-expanded", "true");
+
+    // 逾時自動關閉：降低「開一次側欄、在時效內問無限問題」只算 1 次的曝險
+    clearTimeout(sessionTimer);
+    sessionTimer = setTimeout(() => { if (isOpen) closeSidebar(); }, SESSION_MAX_MINUTES * 60 * 1000);
+
+    if (remaining <= 0) setTimeout(showExhausted, 400);
+  }
+
+  /* ── 關閉側欄 ── */
+  function closeSidebar() {
+    if (!isOpen) return;
+    isOpen = false;
+    clearTimeout(sessionTimer);
+    sidebar.classList.remove("open");
+    layoutWrapper.classList.remove("chat-open");
+    fab.classList.remove("shifted");
+    fab.setAttribute("aria-expanded", "false");
+
+    if (remaining <= 0) { showExhausted(); return; }
+    startCooldown(COOLDOWN_SEC);
+  }
+
+  /* ── 事件 ── */
+  fab.addEventListener("click", () => {
+    if (fab.disabled) return;
+    if (remaining <= 0) { openSidebar(); return; }
+    isOpen ? closeSidebar() : openSidebar();
+  });
+
+  sidebarClose.addEventListener("click", closeSidebar);
+
+  /* ── 初始化 ── */
+  updateUsageTag();
+  if (remaining <= 0) {
+    fab.classList.add("exhausted");
+    fab.title = "使用次數已達上限";
+  } else {
+    setTimeout(() => { badge.style.display = "block"; }, 3000);
+  }
+
+  return {
+    open:   openSidebar,
+    close:  closeSidebar,
+    toggle: () => (isOpen ? closeSidebar() : openSidebar()),
+    isOpen: () => isOpen
+  };
+})();
+
+
+// ══════════════════════════════════════════════════════════════
+// 區塊 B：搜尋系統
+// ══════════════════════════════════════════════════════════════
+
+// ── 資料與狀態 ────────────────────────────────────────────
+// ⚠️ 雲端設定：請填入您的 Google Apps Script (GAS) Web 應用程式網址
+// 若留空 ""，系統會自動降級讀取本地同層的 "data.json" 與 "pdf/"，方便本機/離線測試
+const GAS_API_URL = "https://script.google.com/macros/s/AKfycbxskq2R4s6_R-aeHqDj5vuo4Fr_5belg0wVIXUuV1VTDUKfFZH6w_DquL5Ft_kBDdBvWA/exec"
+
+let database = [];
+let filtered = [];
+let currentPage = 1;
+const PER_PAGE = 10;
+
+// ── 初始化 ────────────────────────────────────────────────
+async function init() {
+  try {
+    const dataSrc = GAS_API_URL || "data.json";
+    const res = await fetch(dataSrc);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const rawData = await res.json();
+    if (Array.isArray(rawData)) {
+      database = rawData;
+    } else if (rawData && Array.isArray(rawData.records)) {
+      database = rawData.records;
+      if (rawData.pdfMap) {
+        window.MeetMindPdfMap = rawData.pdfMap;
+      }
+    } else {
+      database = [];
+    }
+    prepareData();
+    buildYearFilter();
+    const hasState = loadUrlState();
+    if (hasState) search(); else renderEmpty();
+  } catch (e) {
+    console.error("初始化失敗：", e);
+    // colspan 必須等於表頭欄位數（8 欄），否則載入失敗時版面會歪斜
+    document.getElementById("resultsBody").innerHTML =
+      '<tr><td colspan="8" class="empty">無法讀取會議資料庫，請確認網路連線、data.json 檔案位置或 GAS 雲端設定。</td></tr>';
+  }
+}
+
+// ── URL 查詢狀態（可分享連結、瀏覽器上一頁可還原搜尋）────────
+// 用 replaceState 而非 pushState：避免每敲一個字就塞爆瀏覽器歷史紀錄。
+function syncUrlState() {
+  const q    = document.getElementById("searchInput").value;
+  const year = document.getElementById("yearFilter").value;
+  const type = document.getElementById("typeFilter").value;
+  const sort = document.getElementById("sortMode").value;
+
+  const params = new URLSearchParams();
+  if (q)    params.set("q", q);
+  if (year) params.set("year", year);
+  if (type) params.set("type", type);
+  if (sort && sort !== "relevance") params.set("sort", sort);
+
+  const qs = params.toString();
+  const newUrl = location.pathname + (qs ? `?${qs}` : "");
+  history.replaceState(null, "", newUrl);
+}
+
+// 回傳是否讀到任何有效條件，供 init() 決定要不要立即執行搜尋
+function loadUrlState() {
+  const params = new URLSearchParams(location.search);
+  const q    = params.get("q")    || "";
+  const year = params.get("year") || "";
+  const type = params.get("type") || "";
+  const sort = params.get("sort") || "relevance";
+
+  document.getElementById("searchInput").value = q;
+  if (year) document.getElementById("yearFilter").value = year;
+  if (type) document.getElementById("typeFilter").value = type;
+  document.getElementById("sortMode").value = sort;
+
+  return Boolean(q || year || type);
+}
+
+// ── 資料前處理 ────────────────────────────────────────────
+function safeStr(v) {
+  return v == null ? "" : String(v);
+}
+
+// ── 中文數字 → 阿拉伯數字（支援一～九十九）─────────────────
+const CN_MAP = { 零:0, 一:1, 二:2, 三:3, 四:4, 五:5, 六:6, 七:7, 八:8, 九:9 };
+function cnToInt(s) {
+  s = (s || "").trim();
+  if (!s) return null;
+  if (!s.includes("十")) {
+    return s.length === 1 ? (CN_MAP[s] ?? null) : null;
+  }
+  const parts = s.split("十");
+  const tens  = parts[0] ? (CN_MAP[parts[0]] ?? 1) : 1;
+  const ones  = (parts[1] && CN_MAP[parts[1]] !== undefined) ? CN_MAP[parts[1]] : 0;
+  return tens * 10 + ones;
+}
+
+function extractYear(meetingName) {
+  const s = safeStr(meetingName);
+  // 格式一：阿拉伯數字「96 學年度」
+  // 注意：部分舊資料的「年」「度」是 CJK 相容字（U+F98E / U+FA01），
+  // 但「學年度」三字的正規比對只需涵蓋 U+5B78（學）U+5E74（年）U+5EA6（度）
+  // 以及相容字 U+F98E（年）U+FA01（度），故改用 Unicode range 兜底
+  const m1 = s.match(/(\d{2,3})\s*[\u5B78][\u5E74\uF98E][\u5EA6\uFA01]/) ||
+             s.match(/(\d{2,3})\s*學年度/);
+  if (m1) return m1[1];
+  // 格式二：中文數字「九十二學年度」
+  const m2 = s.match(/([零一二三四五六七八九十]+)學年度/);
+  if (m2) { const v = cnToInt(m2[1]); return v != null ? String(v) : "未知"; }
+  return "未知";
+}
+
+function extractSemester(meetingName) {
+  // 第幾學期 → 1 或 2；找不到回傳 9（排最後）
+  const s = safeStr(meetingName);
+  const m1 = s.match(/第\s*([12])\s*學期/);
+  if (m1) return Number(m1[1]);
+  const m2 = s.match(/第([一二])學期/);
+  if (m2) return m2[1] === "一" ? 1 : 2;
+  return 9;
+}
+
+function extractSeq(meetingName) {
+  // 臨時會議排在正式會議之後（回傳 99）
+  const s = safeStr(meetingName);
+  if (/臨時/.test(s)) return 99;
+  // 學期之後的次別
+  const afterSem = s.replace(/^.*?學期/, "");
+  const m1 = afterSem.match(/第\s*(\d+)\s*次/);
+  if (m1) return Number(m1[1]);
+  const m2 = afterSem.match(/第([一二三四五六七八九十]+)次/);
+  if (m2) { const v = cnToInt(m2[1]); return v != null ? v : 9; }
+  return 9;
+}
+
+function extractProposalNum(title) {
+  // 從案由標題抓提案序號「【提案一】」→ 1
+  const s = safeStr(title);
+  const m1 = s.match(/【提案\s*(\d+)\s*】/);
+  if (m1) return Number(m1[1]);
+  const m2 = s.match(/【提案([零一二三四五六七八九十]+)】/);
+  if (m2) { const v = cnToInt(m2[1]); return v != null ? v : 9999; }
+  return 9999;
+}
+
+// 多標籤分類：一個提案可同時符合多種類型（如「申請修正○○辦法」同時是修訂與申請），
+// 各類型獨立比對、不互斥；完全無命中才歸入「其他」。
+// 「新增」條件涵蓋公文常見的三種立法用語：新增／新訂／增訂，以及訂定、擬訂、擬定、制定等。
+// 早期版本漏列「新訂」與「增訂」，導致 20 筆新訂法規案有 12 筆被歸入「其他」而無法以
+// 「新增」類型篩出（2026-09-03 修正）。
+function detectTypes(title) {
+  const t = safeStr(title);
+  const types = [];
+  if (/修正|修訂|修訂案|條文修正|辦法修正|調整|修改|變更|廢止|廢除|停招|停止|終止/.test(t)) types.push("修訂");
+  if (/申請|擬申請|申辦|續約/.test(t))                                                       types.push("申請");
+  if (/報告|提請核備|核備|工作報告|備查|追認/.test(t))                                          types.push("報告");
+  if (/新增|新訂|增訂|新設|新開|增設|設立|成立|訂定|擬訂|擬定|制定|簽訂|合作/.test(t))            types.push("新增");
+  if (!types.length) types.push("其他");
+  return types;
+}
+
+function prepareData() {
+  database = database.map((item, i) => {
+    const meetingName = safeStr(item.meetingName);
+    const title       = safeStr(item.title);
+    const unit        = safeStr(item.unit);
+    const content     = safeStr(item.content);
+    const result      = safeStr(item.result);
+    const fileName    = safeStr(item.fileName);
+    const id          = safeStr(item.id) || `row_${i}`;
+    const year        = extractYear(meetingName);
+    const semester    = extractSemester(meetingName);
+    const seq         = extractSeq(meetingName);
+    const proposalNum = extractProposalNum(title);
+    const types       = detectTypes(title);
+
+    // 全文搜尋字串（小寫，供 includes 比對）
+    const searchText = [
+      title, content, result, unit, meetingName, fileName, id
+    ].join(" ").toLowerCase();
+
+    return {
+      ...item,
+      meetingName, title, unit, content, result, fileName, id,
+      year, semester, seq, proposalNum, types, searchText
+    };
+  });
+}
+
+// ── 年度下拉選單 ──────────────────────────────────────────
+function buildYearFilter() {
+  const years = [...new Set(database.map(d => d.year))]
+    .filter(y => y !== "未知")
+    .sort((a, b) => Number(a) - Number(b));   // 小 → 大
+
+  const sel = document.getElementById("yearFilter");
+  years.forEach(y => {
+    const opt = document.createElement("option");
+    opt.value = y;
+    opt.textContent = y;
+    sel.appendChild(opt);
+  });
+}
+
+// ── 排序：年度(小→大) → 學期(1→2) → 次別(1→2→...→99臨時) → 提案號 ──
+function sortResults(arr) {
+  return arr.slice().sort((a, b) => {
+    const ya = Number(a.year) || 0, yb = Number(b.year) || 0;
+    if (ya !== yb) return ya - yb;
+    if (a.semester !== b.semester) return a.semester - b.semester;
+    if (a.seq !== b.seq) return a.seq - b.seq;
+    return a.proposalNum - b.proposalNum;
+  });
+}
+
+// ── 查詢字串解析 ──────────────────────────────────────────
+// 支援三種語法：
+//   1. 空白分隔多關鍵字 → 全部命中才算符合（AND）
+//   2. "完整詞組"       → 視為單一關鍵字（可含空白）
+//   3. -排除詞          → 命中即剔除
+// 全形引號「」“” 與全形減號－ 一併視為半角處理，避免中文輸入法造成查不到。
+function parseQuery(raw) {
+  const terms = [], excludes = [];
+  const s = safeStr(raw)
+    .replace(/[“”「」]/g, '"')   // “ ” 「 」 → "
+    .replace(/－/g, "-");                       // －       → -
+
+  const re = /(-?)(?:"([^"]*)"|(\S+))/g;
+  let m;
+  while ((m = re.exec(s)) !== null) {
+    const neg = m[1] === "-";
+    let t = (m[2] !== undefined ? m[2] : m[3]) || "";
+    t = t.replace(/^-+/, "").replace(/"/g, "").trim().toLowerCase();
+    if (!t) continue;
+    (neg ? excludes : terms).push(t);
+  }
+  return { terms, excludes };
+}
+
+// 目前是否套用相關度排序（需有正向關鍵字才有意義）
+function isRelevanceMode(terms) {
+  return document.getElementById("sortMode").value === "relevance" && terms.length > 0;
+}
+
+// ── 搜尋主流程 ────────────────────────────────────────────
+function search() {
+  const year = document.getElementById("yearFilter").value;
+  const type = document.getElementById("typeFilter").value;
+  const { terms, excludes } = parseQuery(document.getElementById("searchInput").value);
+
+  if (!terms.length && !excludes.length && !year && !type) {
+    filtered = [];
+    currentPage = 1;
+    renderEmpty();
+    syncUrlState();
+    return;
+  }
+
+  filtered = database.filter(item => {
+    if (year && item.year !== year) return false;
+    if (type && !item.types.includes(type)) return false;
+    // 多關鍵字：全部都要命中
+    for (const t of terms)    if (!item.searchText.includes(t)) return false;
+    // 排除詞：命中任一即剔除
+    for (const t of excludes) if (item.searchText.includes(t))  return false;
+    return true;
+  });
+
+  // 有關鍵字時可依相關度排序；否則一律依年度→學期→次別→提案號
+  filtered = isRelevanceMode(terms)
+    ? rankByScore(filtered, terms)
+    : sortResults(filtered);
+
+  currentPage = 1;
+  render();
+  syncUrlState();
+}
+
+// ── 相關度加權排序 ────────────────────────────────────────
+// 案由 ×5、內容 ×3、決議 ×2、單位 ×1、會議 ×1，多關鍵字分數累加；
+// 同分時退回年度→學期→次別→提案號，確保結果順序穩定。
+function rankByScore(arr, terms) {
+  const regexes = terms.map(t => new RegExp(escapeRegExp(t), "gi"));
+
+  const scored = arr.map(item => {
+    let score = 0;
+    for (const re of regexes) {
+      const count = (field, weight) =>
+        ((safeStr(field).match(re) || []).length) * weight;
+
+      score += count(item.title,       5) +
+               count(item.content,     3) +
+               count(item.result,      2) +
+               count(item.unit,        1) +
+               count(item.meetingName, 1);
+    }
+    return { item, score };
+  });
+
+  scored.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    const ya = Number(a.item.year) || 0, yb = Number(b.item.year) || 0;
+    if (ya !== yb) return ya - yb;
+    if (a.item.semester !== b.item.semester) return a.item.semester - b.item.semester;
+    if (a.item.seq !== b.item.seq) return a.item.seq - b.item.seq;
+    return a.item.proposalNum - b.item.proposalNum;
+  });
+
+  return scored.map(s => s.item);
+}
+
+// ── 渲染 ──────────────────────────────────────────────────
+function escapeHtml(s) {
+  return safeStr(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function escapeRegExp(s) {
+  return safeStr(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// 多關鍵字同時高亮（先逸出 HTML，再以逸出後的字串組正規表示式）
+function highlight(text, terms) {
+  const escaped = escapeHtml(text);
+  if (!terms || !terms.length) return escaped;
+  const pattern = terms.map(t => escapeRegExp(escapeHtml(t))).filter(Boolean).join("|");
+  if (!pattern) return escaped;
+  return escaped.replace(new RegExp(`(${pattern})`, "gi"), "<mark>$1</mark>");
+}
+
+function shorten(text, max = 90) {
+  const s = safeStr(text);
+  return s.length > max ? s.slice(0, max) + "…" : s;
+}
+
+// 摘要以命中關鍵字為中心取前後文（keyword-in-context），
+// 避免關鍵字出現在固定截斷點之後時完全看不到高亮。無關鍵字時退回原本開頭截斷。
+function contextSnippet(text, terms, radius = 45) {
+  const s = safeStr(text);
+  if (!terms || !terms.length) return shorten(s, radius * 2);
+
+  const lower = s.toLowerCase();
+  let hitPos = -1;
+  for (const t of terms) {
+    if (!t) continue;
+    const idx = lower.indexOf(t.toLowerCase());
+    if (idx !== -1 && (hitPos === -1 || idx < hitPos)) hitPos = idx;
+  }
+  if (hitPos === -1) return shorten(s, radius * 2);
+
+  const start = Math.max(0, hitPos - radius);
+  const end   = Math.min(s.length, hitPos + radius);
+  let snippet = s.slice(start, end);
+  if (start > 0) snippet = "…" + snippet;
+  if (end < s.length) snippet = snippet + "…";
+  return snippet;
+}
+
+function renderEmpty() {
+  document.getElementById("resultCount").textContent = "共 0 筆結果";
+  document.getElementById("resultsBody").innerHTML =
+    '<tr><td colspan="8" class="empty">請輸入關鍵字或設定篩選條件後開始搜尋。</td></tr>';
+  document.getElementById("pagination").innerHTML = "";
+}
+
+function render() {
+  const total      = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
+  const { terms }  = parseQuery(document.getElementById("searchInput").value);
+  const sortLabel  = isRelevanceMode(terms) ? "依相關度" : "依年度時序";
+  document.getElementById("resultCount").textContent =
+    `共 ${total} 筆結果　第 ${currentPage} / ${totalPages} 頁　（${sortLabel}排序）`;
+  renderTable();
+  renderPagination();
+}
+
+function renderTable() {
+  const { terms } = parseQuery(document.getElementById("searchInput").value);
+  const start     = (currentPage - 1) * PER_PAGE;
+  const pageItems = filtered.slice(start, start + PER_PAGE);
+  const tbody     = document.getElementById("resultsBody");
+
+  if (!pageItems.length) {
+    tbody.innerHTML =
+      '<tr><td colspan="8" class="empty">查無資料，請嘗試其他關鍵字或調整篩選條件。</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = pageItems.map(item => {
+    let pdfHref = null;
+    if (item.fileName) {
+      if (window.MeetMindPdfMap && window.MeetMindPdfMap[item.fileName]) {
+        // 直接直連 Google Drive 原生預覽（0 秒延遲、100% 成功、徹底避開 Apps Script 沙盒轉址！）
+        pdfHref = `https://drive.google.com/file/d/${window.MeetMindPdfMap[item.fileName]}/preview`;
+      } else if (GAS_API_URL) {
+        pdfHref = `${GAS_API_URL}?pdf=${encodeURIComponent(item.fileName)}`;
+      } else {
+        pdfHref = `pdf/${encodeURIComponent(item.fileName)}`;
+      }
+    }
+    const pdfCell = pdfHref
+      ? `<a class="pdf-btn" href="${pdfHref}" target="_blank" rel="noopener noreferrer">開啟檔案</a>`
+      : `<span style="color:#9ca3af">無檔案</span>`;
+
+    return `
+      <tr>
+        <td>${escapeHtml(item.year)}</td>
+        <td>${escapeHtml(item.meetingName)}</td>
+        <td>${escapeHtml(item.unit)}</td>
+        <td>${highlight(item.title, terms)}</td>
+        <td>
+          <span class="summary-link"
+                data-preview="content"
+                data-id="${escapeHtml(item.id)}">
+            ${highlight(contextSnippet(item.content, terms), terms)}
+          </span>
+        </td>
+        <td>
+          <span class="summary-link"
+                data-preview="result"
+                data-id="${escapeHtml(item.id)}">
+            ${highlight(contextSnippet(item.result, terms), terms)}
+          </span>
+        </td>
+        <td class="col-page">
+          ${item.page != null
+            ? `<span class="page-tag">第 ${escapeHtml(String(item.page))} 頁</span>`
+            : `<span style="color:#9ca3af">—</span>`}
+        </td>
+        <td class="col-pdf">${pdfCell}</td>
+      </tr>`;
+  }).join("");
+}
+
+function renderPagination() {
+  const totalPages = Math.ceil(filtered.length / PER_PAGE);
+  const el = document.getElementById("pagination");
+
+  if (totalPages <= 1) {
+    el.innerHTML = "";
+    return;
+  }
+
+  let html = `<button class="page-btn" data-page="${currentPage - 1}"
+                ${currentPage === 1 ? "disabled" : ""}>上一頁</button>`;
+
+  for (let i = 1; i <= totalPages; i++) {
+    html += `<button class="page-btn ${i === currentPage ? "active" : ""}"
+                     data-page="${i}">${i}</button>`;
+  }
+
+  html += `<button class="page-btn" data-page="${currentPage + 1}"
+             ${currentPage === totalPages ? "disabled" : ""}>下一頁</button>`;
+
+  el.innerHTML = html;
+}
+
+// ── 彈窗 ──────────────────────────────────────────────────
+function isModalOpen() {
+  return document.getElementById("modalMask").style.display === "flex";
+}
+
+function openModal(title, content) {
+  document.getElementById("modalTitle").textContent   = title;
+  document.getElementById("modalContent").textContent = safeStr(content) || "無資料";
+  document.getElementById("modalMask").style.display  = "flex";
+  document.body.style.overflow = "hidden";
+}
+
+function closeModal() {
+  document.getElementById("modalMask").style.display = "none";
+  document.body.style.overflow = "";
+}
+
+function getItemById(id) {
+  return database.find(item => String(item.id) === String(id));
+}
+
+// ── CSV 匯出（匯出目前篩選後的「全部」結果，非僅當前頁）────
+function escapeCsvField(v) {
+  const s = safeStr(v).replace(/\r?\n/g, " ");
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
+function exportCsv() {
+  if (!filtered.length) {
+    alert("目前沒有可匯出的結果，請先輸入關鍵字或設定篩選條件。");
+    return;
+  }
+
+  const header = ["年度", "會議", "單位", "案由", "內容", "決議", "頁碼", "PDF"];
+  const rows = filtered.map(item => [
+    item.year,
+    item.meetingName,
+    item.unit,
+    item.title,
+    item.content,
+    item.result,
+    item.page != null ? item.page : "",
+    item.fileName
+      ? (window.MeetMindPdfMap && window.MeetMindPdfMap[item.fileName]
+          ? `https://drive.google.com/file/d/${window.MeetMindPdfMap[item.fileName]}/preview`
+          : (GAS_API_URL ? `${GAS_API_URL}?pdf=${encodeURIComponent(item.fileName)}` : `pdf/${item.fileName}`))
+      : ""
+  ]);
+
+  const csv = [header, ...rows]
+    .map(row => row.map(escapeCsvField).join(","))
+    .join("\r\n");
+
+  // 前綴 BOM，確保 Excel 開啟時中文不會變亂碼
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  const ts   = new Date().toISOString().slice(0, 10);
+  a.href     = url;
+  a.download = `教務會議搜尋結果_${ts}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// 區塊 C：頁籤切換（資料搜尋／AI 問答／使用說明）
+// AI 問答由 Google NotebookLM 提供，Google 不允許外部網站以 iframe 嵌入其頁面
+// （回應標頭帶 X-Frame-Options: DENY），因此此頁籤只放說明與「在新視窗開啟」按鈕，
+// 不嘗試嵌入實際問答畫面。右下角的 Copilot Studio AI 助理則是獨立的側欄，
+// 與頁籤狀態無關，在任一頁籤下都能開啟。
+// ══════════════════════════════════════════════════════════════
+const TABS = {
+  search:   { btn: "tabSearchBtn",   view: "searchView"   },
+  notebook: { btn: "tabNotebookBtn", view: "notebookView" },
+  guide:    { btn: "tabGuideBtn",    view: "guideView"    }
+};
+
+function switchTab(tab) {
+  Object.keys(TABS).forEach(key => {
+    const active = (key === tab);
+    const conf   = TABS[key];
+    document.getElementById(conf.view).hidden = !active;
+    const btn = document.getElementById(conf.btn);
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-selected", String(active));
+  });
+}
+
+// 使用說明頁的範例按鈕：帶入查詢字串並立即執行。
+// 會一併清空年度／類型篩選並切回相關度排序，
+// 確保實際筆數與說明頁上標示的數字一致，避免使用者以為說明寫錯。
+function runDemoQuery(q) {
+  switchTab("search");
+  document.getElementById("yearFilter").value = "";
+  document.getElementById("typeFilter").value = "";
+  document.getElementById("sortMode").value   = "relevance";
+  const input = document.getElementById("searchInput");
+  input.value = q;
+  search();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  input.focus();
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// 區塊 D：事件綁定
+// ══════════════════════════════════════════════════════════════
+document.addEventListener("DOMContentLoaded", () => {
+  init();
+
+  // 頁籤
+  document.getElementById("tabSearchBtn")  .addEventListener("click", () => switchTab("search"));
+  document.getElementById("tabNotebookBtn").addEventListener("click", () => switchTab("notebook"));
+  document.getElementById("tabGuideBtn")   .addEventListener("click", () => switchTab("guide"));
+
+  // AI 問答頁籤內的「立即開啟 AI 助理」
+  document.getElementById("openChatFromNotebook").addEventListener("click", () => MeetMindChat.open());
+
+  // 搜尋框下方提示區的「查看完整使用說明」
+  document.getElementById("openGuideFromHint").addEventListener("click", () => {
+    switchTab("guide");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+
+  // 使用說明頁的範例按鈕（事件委派）
+  document.getElementById("guideView").addEventListener("click", e => {
+    const btn = e.target.closest("[data-demo-query]");
+    if (!btn) return;
+    runDemoQuery(btn.dataset.demoQuery);
+  });
+
+  // 搜尋條件
+  document.getElementById("searchInput").addEventListener("input",  search);
+  document.getElementById("yearFilter") .addEventListener("change", search);
+  document.getElementById("typeFilter") .addEventListener("change", search);
+  document.getElementById("sortMode")   .addEventListener("change", search);
+  document.getElementById("exportCsvBtn").addEventListener("click", exportCsv);
+
+  // 表格內容展開（事件委派）
+  document.getElementById("resultsBody").addEventListener("click", e => {
+    const el = e.target.closest("[data-preview]");
+    if (!el) return;
+    const item = getItemById(el.dataset.id);
+    if (!item) return;
+    const field = el.dataset.preview;
+    openModal(
+      field === "content" ? "內容摘要" : "決議摘要",
+      item[field]
+    );
+  });
+
+  // 分頁（事件委派）
+  document.getElementById("pagination").addEventListener("click", e => {
+    const btn = e.target.closest("[data-page]");
+    if (!btn || btn.disabled) return;
+    const p = Number(btn.dataset.page);
+    const total = Math.ceil(filtered.length / PER_PAGE);
+    if (p < 1 || p > total) return;
+    currentPage = p;
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+
+  // 彈窗關閉（點遮罩、按關閉鈕）
+  document.getElementById("modalMask")    .addEventListener("click", e => { if (e.target.id === "modalMask") closeModal(); });
+  document.getElementById("closeModalBtn").addEventListener("click", closeModal);
+
+  // Esc 鍵統一處理：彈窗優先，沒有彈窗才關閉 AI 助理側欄。
+  // （原本兩份檔案各自綁定 Esc，整合後若不分優先序，
+  //   在側欄開啟中檢視內容時按 Esc 會同時關掉兩者。）
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Escape") return;
+    if (isModalOpen()) { closeModal(); return; }
+    if (MeetMindChat.isOpen()) MeetMindChat.close();
+  });
+});
+</script>
+</body>
+</html>
